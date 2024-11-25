@@ -7,7 +7,8 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 #------------------------------------------------------------------------------
 # FLAGS for building
 #------------------------------------------------------------------------------
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result -std=c++11")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result -std=c++17")
 
 find_package(MPI REQUIRED)
 if(MPI_FOUND)
