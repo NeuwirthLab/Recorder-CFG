@@ -59,6 +59,10 @@ add_executable(recorder-summary recorder-summary.c)
 target_link_libraries(recorder-summary reader)
 add_dependencies(recorder-summary reader)
 
+add_executable(cfg-exporter cfg-exporter.cpp)
+target_link_libraries(cfg-exporter reader)
+add_dependencies(cfg-exporter reader)
+
 
 if(RECORDER_ENABLE_PARQUET)
     message("-- " "Configuring Parquet tool: TRUE")
@@ -102,7 +106,7 @@ endif()
 # Add Target(s) to CMake Install
 #-----------------------------------------------------------------------------
 #set(targets reader recorder2text metaops_checker conflict_detector)
-set(targets reader recorder2text recorder2timeline conflict-detector recorder-summary)
+set(targets reader recorder2text recorder2timeline conflict-detector recorder-summary cfg-exporter)
 foreach(target ${targets})
     install(
         TARGETS
