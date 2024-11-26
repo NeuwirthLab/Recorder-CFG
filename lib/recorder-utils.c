@@ -277,15 +277,32 @@ void recorder_barrier(MPI_Comm comm) {
 
 /* Integer to stirng */
 inline char* itoa(off64_t val) {
-    char *str = calloc(32, sizeof(char));
-    sprintf(str, "%ld", val);
+    char *str = calloc(64, sizeof(char));
+    snprintf(str, 64, "%ld", val);
+    if(str[63] != 0) {
+        printf("error: val has more than 64 digits\n");
+        fflush(stdout);
+        exit(-1);
+    }
     return str;
 }
 
 /* float to stirng */
 inline char* ftoa(double val) {
-    char *str = calloc(32, sizeof(char));
-    sprintf(str, "%f", val);
+    char *str = calloc(64, sizeof(char));
+    snprintf(str, 64, "%.3f", val);
+
+    // it's possible the passed in val is some garbage
+    // data. e.g., a non-initialized pointer ==> val=*ptr
+    // in this case str may not properly ended with NULL
+    //
+    // use snprintf instead of sprintf will prevent this
+    // from happening.
+    if(str[63] != 0) {
+        printf("error: val has more than 64 digits\n");
+        fflush(stdout);
+        exit(-1);
+    }
     return str;
 }
 
@@ -293,8 +310,8 @@ inline char* ftoa(double val) {
 inline char* ptoa(const void *ptr) {
     char* str;
     if(log_pointer) {
-        str = calloc(16, sizeof(char));
-        sprintf(str, "%p", ptr);
+        str = calloc(32, sizeof(char));
+        snprintf(str, 32, "%p", ptr);
     } else {
         str = calloc(3, sizeof(char));
         str[0] = '%'; str[1] = 'p';
@@ -302,8 +319,21 @@ inline char* ptoa(const void *ptr) {
     return str;
 }
 
+/* a calloc and safer version of strudup */
+inline char* strtoa(const char* ptr) {
+    char* str; 
+    if (ptr == NULL) {
+        str = (char*) calloc(5, sizeof(char));
+        strcpy(str, "NULL");
+    } else {
+        str = (char*) calloc(strlen(ptr)+1, sizeof(char));
+        strcpy(str, ptr);
+    }
+    return str;
+}
+
 inline char* arrtoa(size_t arr[], int count) {
-    char *str = calloc(16 * count, sizeof(char));
+    char *str = calloc(3+16*count, sizeof(char));
     str[0] = '[';
     int pos = 1;
 
@@ -312,14 +342,11 @@ inline char* arrtoa(size_t arr[], int count) {
         char *s = itoa(arr[i]);
         memcpy(str+pos, s, strlen(s));
         pos += strlen(s);
-
-        if(i == count - 1)
-            str[pos++] = ']';
-        else
+        if (i != count-1)
             str[pos++] = ',';
-
         free(s);
     }
+    str[pos] = ']';
     return str;
 }
 
@@ -352,15 +379,15 @@ inline const char* get_function_name_by_id(int id) {
     return func_list[id];
 }
 
-unsigned char get_function_id_by_name(const char* name) {
+int get_function_id_by_name(const char* name) {
     size_t len = sizeof(func_list) / sizeof(char *);
-    unsigned char i;
+    int i;
     for(i = 0; i < len; i++) {
         if (strcmp(func_list[i], name) == 0)
             return i;
     }
     RECORDER_LOGERR("[Recorder] error: missing function %s\n", name);
-    return 255;
+    return -1;
 }
 
 /*
@@ -432,6 +459,7 @@ inline int recorder_ceil(double val) {
     else
         return tmp;
 }
+
 
 inline int recorder_debug_level() {
     return debug_level;

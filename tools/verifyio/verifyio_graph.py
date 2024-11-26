@@ -1,19 +1,16 @@
 #!/usr/bin/env python
 # encoding: utf-8
-from enum import Enum
 import networkx as nx
-
-class MPICallType(Enum):
-    ALL_TO_ALL     = 1
-    ONE_TO_MANY    = 2
-    MANY_TO_ONE    = 3
-    POINT_TO_POINT = 4
-    OTHER          = 5  # e.g., wait/test calls
 
 class VerifyIONode:
     def __init__(self, rank, seq_id, func, fd = -1, mpifh = None):
         self.rank = rank
+        # This is the index with respect to all
+        # Recorder trace records
         self.seq_id = seq_id
+        # This is the index with respect to all
+        # VerifyIONode we read
+        self.index  = -1
         self.func = func
         # An integer maps to the filename
         self.fd = fd
@@ -21,16 +18,17 @@ class VerifyIONode:
         # I/O calls with sync/commit calls during
         # the verification.
         self.mpifh = mpifh
+
     def graph_key(self):
-        return str(self.rank) + "-" + \
-               str(self.seq_id) + "-" + \
-               str(self.func)
+        return str(self.rank) + "-" + str(self.seq_id) + "-" + str(self.func)
+
     def __str__(self):
-        if "write" in self.func or "read" in self.func or \
-            self.func.startswith("MPI_File_"):
-                return "Rank %d: %dth %s(%s)" %(self.rank, self.seq_id, self.func, self.mpifh)
-        else:
-            return "Rank %d: %dth %s" %(self.rank, self.seq_id, self.func)
+        #if "write" in self.func or "read" in self.func or \
+        #    self.func.startswith("MPI_File_"):
+        #        return "Rank %d: %dth %s(%s)" %(self.rank, self.seq_id, self.func, self.mpifh)
+        #else:
+        #    return "Rank %d: %dth %s" %(self.rank, self.seq_id, self.func)
+        return "<Rank %d: %dth %s>" %(self.rank, self.seq_id, self.func)
 
 
 '''
@@ -39,7 +37,7 @@ Essentially a wrapper for networkx DiGraph
 class VerifyIOGraph:
     def __init__(self, nodes, edges, include_vc=False):
         self.G = nx.DiGraph()
-        self.nodes = nodes
+        self.nodes = nodes      # A list of VerifyIONode sorted by seq_id
         self.include_vc = include_vc
         self.__build_graph(nodes, edges, include_vc)
 
@@ -48,21 +46,23 @@ class VerifyIOGraph:
 
     # next (program-order) node of funcs in the sam rank
     def next_po_node(self, current, funcs):
-        index = self.G.nodes[current.graph_key()]['index']
         nodes = self.nodes[current.rank]
+        if not funcs:
+            return nodes[current.index+1]
         target = None
-        for i in range(index+1, len(nodes)):
+        for i in range(current.index+1, len(nodes)):
             if nodes[i].func in funcs:
                 target = nodes[i]
                 break
         return target
 
-    # previous (program-order) node of funcs in the sam rank
+    # previous (program-order) node of funcs in the same rank
     def prev_po_node(self, current, funcs):
-        index = self.G.nodes[current.graph_key()]['index']
         nodes = self.nodes[current.rank]
+        if not funcs:
+            return nodes[current.index-1]
         target = None
-        for i in range(index-1, 0, -1):
+        for i in range(current.index-1, 0, -1):
             if nodes[i].func in funcs:
                 target = nodes[i]
                 break
@@ -74,7 +74,7 @@ class VerifyIOGraph:
         nodes = self.nodes[target_rank]
         for target in nodes:
             if (target.func in funcs) and (self.has_path(current, target)):
-                targest.append(target)
+                target.append(target)
                 break
         return target
 
@@ -96,12 +96,9 @@ class VerifyIOGraph:
     def get_vector_clock(self, n):
         return self.G.nodes[n.graph_key()]['vc']
 
+    # caller need to assume there is no cycle
+    # in the DAG.
     def run_vector_clock(self):
-        # Degug
-        #edges = nx.find_cycle(self.G)
-        #for edge in edges:
-        #    print(edge[0], edge[1])
-        print("run vector clock algorithm...")
         for node_key in nx.topological_sort(self.G):
             vc = self.G.nodes[node_key]['vc']
             for eachpred in self.G.predecessors(node_key):
@@ -111,12 +108,9 @@ class VerifyIOGraph:
 
             self.G.nodes[node_key]['vc'] = vc
             #print(node_key, vc)
-        print("vector clock algorith finished")
 
     def run_transitive_closure(self):
-        print("run transitive closure algorithm...")
         tc = nx.transitive_closure(self.G)
-        print("transitive closure algorithm finished")
 
     # Retrive rank from node key
     def key2rank(self, key):
@@ -134,9 +128,7 @@ class VerifyIOGraph:
         path_in_keys = nx.shortest_path(self.G, src.graph_key(), dst.graph_key())
         path = []
         for key in path_in_keys:
-            rank = self.key2rank(key)
-            index = self.G.nodes[key]['index']
-            path.append(self.nodes[rank][index])
+            path.append(key)
         return path
 
 
@@ -154,78 +146,100 @@ class VerifyIOGraph:
                 t = all_nodes[rank][i+1]
                 self.add_edge(h, t)
 
-                # Include the original index of the `nodes`
-                # i.e., not the seq id of the call.
-                self.G.nodes[h.graph_key()]['index'] = i
-                self.G.nodes[t.graph_key()]['index'] = i+1
-
                 # Include vector clock for each node
-                if include_vc:
-                    vc1 = [0] * (nprocs + 1)    # one more for ghost rank
-                    vc2 = [0] * (nprocs + 1)    # one more for ghost rank 
-                    vc1[rank] = i
-                    vc2[rank] = i+1
-                    self.G.nodes[h.graph_key()]['vc'] = vc1
-                    self.G.nodes[t.graph_key()]['vc'] = vc2
+                if not include_vc: continue
+                vc1 = [0] * (nprocs + 1)    # one more for ghost rank
+                vc2 = [0] * (nprocs + 1)    # one more for ghost rank 
+                vc1[rank] = i
+                vc2[rank] = i+1
+                self.G.nodes[h.graph_key()]['vc'] = vc1
+                self.G.nodes[t.graph_key()]['vc'] = vc2
+
+            # corner case: when this rank has only one node
+            # the code will not run into the previous for loop
+            if len(all_nodes[rank]) == 1:
+                n = all_nodes[rank][0]
+                self.G.add_node(n.graph_key(), vc=[0]*(nprocs+1))
 
         # 2. Add synchornzation orders (using mpi edges)
         # Before calling this function, we should
         # have added all nodes. We use this function
         # to add edges of matching MPI calls
-        ghost_node_index = 0
+        from match_mpi import MPICallType
+        ghost_node_count = 0
         for edge in mpi_edges:
-            head, tail = edge.head, edge.tail
-            # all-to-all
-            # TODO is there a many-to-many MPI call that
-            # different senders and receivers?
-            # for now we assume head == tail
-            if edge.call_type == MPICallType.ALL_TO_ALL:
-                if len(head) <= 1: continue
-                # Method 1:
+
+            # case i: point to point calls
+            if edge.call_type == MPICallType.POINT_TO_POINT:
+                self.add_edge(edge.head, edge.tail)
+                continue
+
+            # case ii: collective calls
+            # We handle all collect calls in a same way
+            # just use them as a fence to establish order
+            # between I/O calls
+            # add a ghost node and connect all predecessors
+            # and successors from all ranks.
+            # This prvents circle
+            mpi_calls = edge.get_all_involved_calls()
+            if len(mpi_calls) <= 1: continue
+            for mpi_call in mpi_calls:
+
                 # Add a ghost node and connect all predecessors
                 # and successors from all ranks. This prvents the circle
-                ghost_node = VerifyIONode(rank=nprocs, seq_id=ghost_node_index, func="ghost")
-                for h in head:
+                ghost_node = VerifyIONode(rank=nprocs, seq_id=ghost_node_count, func="ghost")
+                for h in mpi_calls:
                     # use list() to make a copy to avoid the runtime
                     # error of "dictionary size changed during iteration"
-                    successors = list(self.G.successors(h.graph_key()))
-                    for successor in successors:
-                        self.G.remove_edge(h.graph_key(), successor)
-                    if len(list(self.G.successors(h.graph_key()))) != 0 :
-                        print("Not possible!")
-                    for successor in successors:
-                        self.G.add_edge(ghost_node.graph_key(), successor)
-                
-                for h in head:
+                    try:
+                        successors = list(self.G.successors(h.graph_key()))
+                        for successor in successors:
+                            self.G.remove_edge(h.graph_key(), successor)
+                        if len(list(self.G.successors(h.graph_key()))) != 0 :
+                            print("Not possible!")
+                        for successor in successors:
+                            self.G.add_edge(ghost_node.graph_key(), successor)
+                    except nx.exception.NetworkXError:
+                        # when the node has no successors, the G.successors()
+                        # function through an error instead of an empty list
+                        # (e.g., the last node in the graph)
+                        pass
+
+                for h in mpi_calls:
                     self.add_edge(h, ghost_node)
 
                 vc = [0] * (nprocs + 1)
-                vc[nprocs] = ghost_node_index
+                vc[nprocs] = ghost_node_count
                 self.G.nodes[ghost_node.graph_key()]['vc'] = vc
-                ghost_node_index += 1
+                ghost_node_count += 1
 
-                # Method 2: Native method, connecting all nodes
-                # Add all-to-all edges will create circle and prevent
-                # the use of topological sort
-                #for i in range(len(head)):
-                #    for j in range(len(head)):
-                #        if i != j:
-                #            self.add_edge(head[i], head[j])
+    # Detect cycles of the graph
+    # correct code should contain no cycles.
+    # incorrect code, e.g., with unmatched collective calls
+    # may have cycles
+    # e.g., pnetcdf/test/testcases/test-varm.c
+    # it uses ncmpi_wait() call, which may result in
+    # rank0 calling MPI_File_write_at_all(), and
+    # rank1 calling MPI_File_write_all()
+    #
+    # Our verification algorithm assumes the graph
+    # has no code, so we need do this check first.
+    def check_cycles(self):
+        has_cycles = False
+        try:
+            cycle = nx.find_cycle(self.G)
+            print("Generated graph contain cycles. Original code may have bugs.")
 
-            # many-to-one, e.g., reduce
-            elif edge.call_type == MPICallType.MANY_TO_ONE:
-                for h in head:
-                    self.add_edge(h, tail)
-            # one-to-many, e.g., bcast
-            elif edge.call_type == MPICallType.ONE_TO_MANY:
-                #print(head, tail)
-                for t in tail:
-                    self.add_edge(head, t)
-            # point-to-point, i.e., send-recv
-            elif edge.call_type == MPICallType.POINT_TO_POINT:
-                self.add_edge(head, tail)
-
-        # Transitive clousre is too slow for large graphs
-        #print("Generate transitive closure")
-        #tc = nx.transitive_closure(self.G)
+            simplified_cycle = []
+            for edge in cycle:
+                c1, c2 = edge[0], edge[1]
+                rank1 = self.key2rank(c1)
+                rank2 = self.key2rank(c2)
+                if (rank1 != rank2):
+                    simplified_cycle.append(edge)
+            print(simplified_cycle)
+            has_cycles = True
+        except nx.exception.NetworkXNoCycle:
+            pass
+        return has_cycles
 

@@ -35,9 +35,13 @@ void print_cst(RecorderReader* reader, CST* cst) {
 
 void print_statistics(RecorderReader* reader, CST* cst) {
 
-    int unique_signature[256] = {0};
-    int call_count[256] = {0};
-    int mpi_count = 0, mpiio_count = 0, hdf5_count = 0, posix_count = 0;
+    int* unique_signature = (int*) malloc(sizeof(int)*reader->supported_funcs);
+    int* call_count = (int*) malloc(sizeof(int)*reader->supported_funcs);
+    memset(unique_signature, 0, sizeof(int)*reader->supported_funcs);
+    memset(call_count, 0, sizeof(int)*reader->supported_funcs);
+
+    int mpi_count = 0, mpiio_count = 0, netcdf_count = 0;
+    int pnetcdf_count = 0, hdf5_count = 0, posix_count = 0;
 
     for(int i = 0; i < cst->entries; i++) {
         Record* record = reader_cs_to_record(&cst->cs_list[i]);
@@ -50,6 +54,10 @@ void print_statistics(RecorderReader* reader, CST* cst) {
             mpiio_count += cst->cs_list[i].count;
         if(type == RECORDER_HDF5)
             hdf5_count += cst->cs_list[i].count;
+        if(type == RECORDER_PNETCDF)
+            pnetcdf_count += cst->cs_list[i].count;
+        if(type == RECORDER_NETCDF)
+            netcdf_count += cst->cs_list[i].count;
         if(type == RECORDER_POSIX)
             posix_count += cst->cs_list[i].count;
 
@@ -58,16 +66,19 @@ void print_statistics(RecorderReader* reader, CST* cst) {
 
         recorder_free_record(record);
     }
-    long int total = posix_count + mpi_count + mpiio_count + hdf5_count;
-    printf("Total: %ld\nPOSIX: %d\nMPI: %d\nMPI-IO: %d\nHDF5: %d\n",
-           total, posix_count, mpi_count, mpiio_count, hdf5_count);
+    long int total = posix_count + mpi_count + mpiio_count + hdf5_count + pnetcdf_count;
+    printf("Total: %ld\nPOSIX: %d\nMPI: %d\nMPI-IO: %d\nHDF5: %d\nPnetCDF: %d\nNetCDF: %d\n",
+           total, posix_count, mpi_count, mpiio_count, hdf5_count, pnetcdf_count, netcdf_count);
 
     printf("\n%-25s %18s %18s\n", "Func", "Unique Signature", "Total Call Count");
-    for(int i = 0; i < 256; i++) {
+    for(int i = 0; i < reader->supported_funcs; i++) {
         if(unique_signature[i] > 0) {
-            printf("%-25s %18d %18d\n", func_list[i], unique_signature[i], call_count[i]);
+            printf("%-25s %18d %18d\n", reader->func_list[i], unique_signature[i], call_count[i]);
         }
     }
+
+    free(unique_signature);
+    free(call_count);
 }
 
 void print_metadata(RecorderReader* reader) {
@@ -85,6 +96,8 @@ void print_metadata(RecorderReader* reader) {
     printf("MPI tracing: %s\n", meta->mpi_tracing?"Enabled":"Dsiabled");
     printf("MPI-IO tracing: %s\n", meta->mpiio_tracing?"Enabled":"Dsiabled");
     printf("HDF5 tracing: %s\n", meta->hdf5_tracing?"Enabled":"Dsiabled");
+    printf("PnetCDF tracing: %s\n", meta->pnetcdf_tracing?"Enabled":"Dsiabled");
+    printf("NetCDF tracing: %s\n", meta->netcdf_tracing?"Enabled":"Dsiabled");
     printf("Store thread id: %s\n", meta->store_tid?"True":"False");
     printf("Store call depth: %s\n", meta->store_call_depth?"True":"False");
     printf("Timestamp compression: %s\n", meta->ts_compression?"True":"False");

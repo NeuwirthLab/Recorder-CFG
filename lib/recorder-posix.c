@@ -163,6 +163,7 @@ int WRAPPER_NAME(fdatasync)(int fd) {
     RECORDER_INTERCEPTOR_EPILOGUE(1, args);
 }
 
+/*
 void* WRAPPER_NAME(mmap64)(void *addr, size_t length, int prot, int flags, int fd, off64_t offset) {
     GET_CHECK_FILENAME(mmap64, (addr, length, prot, flags, fd, offset), &fd, ARG_TYPE_FD);
     RECORDER_INTERCEPTOR_PROLOGUE(void*, mmap64, (addr, length, prot, flags, fd, offset));
@@ -182,6 +183,7 @@ int WRAPPER_NAME(msync)(void *addr, size_t length, int flags) {
     char** args = assemble_args_list(3, ptoa(addr), itoa(length), itoa(flags));
     RECORDER_INTERCEPTOR_EPILOGUE(3, args);
 }
+*/
 
 int WRAPPER_NAME(creat)(const char *path, mode_t mode) {
     GET_CHECK_FILENAME(creat, (path, mode), path, ARG_TYPE_PATH);

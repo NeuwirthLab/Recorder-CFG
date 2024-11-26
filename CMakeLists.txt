@@ -4,9 +4,9 @@ include_directories(${PROJECT_BINARY_DIR})
 #------------------------------------------------------------------------------
 # Version information
 #------------------------------------------------------------------------------
-set(RECORDER_VERSION_MAJOR "2")
-set(RECORDER_VERSION_MINOR "5")
-set(RECORDER_VERSION_PATCH "2")
+set(RECORDER_VERSION_MAJOR "3")
+set(RECORDER_VERSION_MINOR "0")
+set(RECORDER_VERSION_PATCH "0")
 set(RECORDER_PACKAGE "recorder")
 set(RECORDER_PACKAGE_NAME "RECORDER")
 set(RECORDER_PACKAGE_VERSION "${RECORDER_VERSION_MAJOR}.${RECORDER_VERSION_MINOR}.${RECORDER_VERSION_PATCH}")
@@ -14,6 +14,13 @@ set(RECORDER_PACKAGE_VERSION_MAJOR "${RECORDER_VERSION_MAJOR}.${RECORDER_VERSION
 set(RECORDER_PACKAGE_VERSION_MINOR "${RECORDER_VERSION_PATCH}")
 set(RECORDER_PACKAGE_STRING "${RECORDER_PACKAGE_NAME} ${RECORDER_PACKAGE_VERSION}")
 set(RECORDER_PACKAGE_TARNAME "${RECORDER_PACKAGE}")
+
+
+# ignore warning message
+if(POLICY CMP0074)
+    cmake_policy(SET CMP0074 OLD)
+endif()
+
 
 #------------------------------------------------------------------------------
 # Setup install and output Directories
@@ -123,6 +130,10 @@ option(RECORDER_ENABLE_PARQUET "Build Parquet format converter." OFF)
 option(RECORDER_ENABLE_CUDA_TRACE "Enable tracing of CUDA kernels." OFF)
 option(RECORDER_ENABLE_FCNTL_TRACE "Enable tracing of fcntl()." ON)
 option(RECORDER_INSTALL_TESTS "Enable installation of tests." OFF)
+
+
+set(PNETCDF_INSTALL_PATH "/usr" CACHE STRING "Build Recorder with PnetCDF")
+
 
 #mark_as_advanced(RECORDER_ENABLE_CUDA_TRACE)
 #mark_as_advanced(RECORDER_ENABLE_FCNTL_TRACE)

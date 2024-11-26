@@ -33,13 +33,13 @@ off64_t iopr_intraprocess(const char *func, off64_t offset) {
     }
 }
 
-int count_function(RecorderLogger *logger, unsigned char filter_func_id) {
+int count_function(RecorderLogger *logger, int filter_func_id) {
     int func_count = 0;
 
     CallSignature *entry, *tmp;
     HASH_ITER(hh, logger->cst, entry, tmp) {
         void* ptr = entry->key+sizeof(pthread_t);
-        unsigned char func_id;
+        int func_id;
         memcpy(&func_id, ptr, sizeof(func_id));
         if(func_id == filter_func_id)
             func_count++;
@@ -50,7 +50,7 @@ int count_function(RecorderLogger *logger, unsigned char filter_func_id) {
 
 void iopr_interprocess_by_func(RecorderLogger *logger, char* func_name, int offset_arg_idx) {
 
-    unsigned char filter_func_id = get_function_id_by_name(func_name);
+    int filter_func_id = get_function_id_by_name(func_name);
     int func_count = count_function(logger, filter_func_id);
 
     struct offset_cs_entry *offset_cs_entries = malloc(sizeof(struct offset_cs_entry) * func_count);
@@ -64,8 +64,8 @@ void iopr_interprocess_by_func(RecorderLogger *logger, char* func_name, int offs
     HASH_ITER(hh, logger->cst, entry, tmp) {
         void* ptr = entry->key+sizeof(pthread_t);
 
-        unsigned char func_id;
-        memcpy(&func_id, ptr, sizeof(unsigned char));
+        int func_id;
+        memcpy(&func_id, ptr, sizeof(func_id));
 
         if(func_id == filter_func_id) {
 

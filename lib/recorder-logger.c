@@ -47,13 +47,16 @@ void free_record(Record *record) {
 
     if(record->args) {
         for(int i = 0; i < record->arg_count; i++)
-            free(record->args[i]);  // note here we don't use recorder_free
-                                    // because the memory was potentially
-                                    // allocated by realpath(), strdup() other system calls.
+            if(record->args[i])
+                free(record->args[i]);  // note here we don't use recorder_free
+                                        // because the memory was potentially
+                                        // allocated by realpath(), strdup() other system calls.
         recorder_free(record->args, sizeof(char*)*record->arg_count);
     }
 
-    // we don't the return type so we use the system free()
+    // we don't know the return type
+    // so record->res was allocated/freed
+    // using the system malloc/free()
     if(record->res)
         free(record->res);
 
@@ -238,6 +241,7 @@ void logger_init() {
     GOTCHA_SET_REAL_CALL(fflush, RECORDER_POSIX);
     GOTCHA_SET_REAL_CALL(fclose, RECORDER_POSIX);
     GOTCHA_SET_REAL_CALL(fwrite, RECORDER_POSIX);
+    GOTCHA_SET_REAL_CALL(fseek,  RECORDER_POSIX);
     GOTCHA_SET_REAL_CALL(rmdir,  RECORDER_POSIX);
     GOTCHA_SET_REAL_CALL(remove, RECORDER_POSIX);
     GOTCHA_SET_REAL_CALL(access, RECORDER_POSIX);
@@ -322,15 +326,17 @@ void save_global_metadata() {
     sprintf(metadata_filename, "%s/recorder.mt", logger.traces_dir);
     FILE* metafh = GOTCHA_REAL_CALL(fopen) (metadata_filename, "wb");
     RecorderMetadata metadata = {
-        .time_resolution     = logger.ts_resolution,
         .total_ranks         = logger.nprocs,
         .posix_tracing       = gotcha_posix_tracing(),
         .mpi_tracing         = gotcha_mpi_tracing(),
         .mpiio_tracing       = gotcha_mpiio_tracing(),
         .hdf5_tracing        = gotcha_hdf5_tracing(),
+        .pnetcdf_tracing     = gotcha_pnetcdf_tracing(),
+        .netcdf_tracing      = gotcha_netcdf_tracing(),
         .store_tid           = logger.store_tid,
         .store_call_depth    = logger.store_call_depth,
         .start_ts            = logger.start_ts,
+        .time_resolution     = logger.ts_resolution,
         .ts_buffer_elements  = logger.ts_max_elements,
         .ts_compression      = logger.ts_compression,
         .interprocess_compression = logger.interprocess_compression,
@@ -338,7 +344,9 @@ void save_global_metadata() {
         .intraprocess_pattern_recognition = logger.intraprocess_pattern_recognition,
     };
     GOTCHA_REAL_CALL(fwrite)(&metadata, sizeof(RecorderMetadata), 1, metafh);
-
+    // reserve the first 1024 bytes to store the metadata block
+    GOTCHA_REAL_CALL(fseek)(metafh, 1024, SEEK_SET);
+    // then write out the supported functions line by line
     for(int i = 0; i < sizeof(func_list)/sizeof(char*); i++) {
         const char *funcname = get_function_name_by_id(i);
         GOTCHA_REAL_CALL(fwrite)(funcname, strlen(funcname), 1, metafh);

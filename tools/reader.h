@@ -35,11 +35,14 @@ typedef struct RecorderReader_t {
 
     RecorderMetadata metadata;
 
-    char func_list[256][64];
+    int supported_funcs;        // total number of supported functions, it is the length of func_list
+    char** func_list;
     char logs_dir[1024];
 
     int mpi_start_idx;
     int hdf5_start_idx;
+    int pnetcdf_start_idx;
+    int netcdf_start_idx;
 
     double prev_tstart;
 
@@ -69,11 +72,28 @@ typedef struct RecorderReader_t {
 typedef struct PyRecord_t {
     double tstart, tend;
     unsigned char call_depth;
-    unsigned char func_id;
+    int func_id;
     int tid;
     unsigned char arg_count;
     char **args;
 } PyRecord;
+
+
+/**
+ * Simplified Record structure
+ * for use by the VerifyIO python
+ * code.
+ *
+ * Note in this structure, char** args
+ * no longer store every argument, but
+ * only those needed by VerifyIO
+ */
+typedef struct VerifyIORecord_t {
+    int func_id;
+    unsigned char call_depth;
+    unsigned char arg_count;
+    char** args;
+} VerifyIORecord;
 
 
 void recorder_init_reader(const char* logs_dir, RecorderReader *reader);
@@ -93,6 +113,7 @@ void recorder_free_record(Record* r);
  */
 void recorder_decode_records(RecorderReader* reader, int rank,
                              void (*user_op)(Record* r, void* user_arg), void* user_arg);
+// used by to implement read_all_records for recorder_viz
 void recorder_decode_records2(RecorderReader* reader, int rank,
                              void (*user_op)(Record* r, void* user_arg), void* user_arg);
 

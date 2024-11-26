@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <limits.h>
 #include <vector>
+#include <algorithm>
 extern "C" {
 #include "reader.h"
 #include "reader-private.h"
@@ -19,6 +20,18 @@ int compare_by_offset(const void *lhs, const void *rhs) {
     Interval *first = (Interval*)lhs;
     Interval *second = (Interval*)rhs;
     return first->offset - second->offset;
+}
+
+int compare_by_index(const void *lhs, const void *rhs) {
+    Interval *first = (Interval*)lhs;
+    Interval *second = (Interval*)rhs;
+
+    if (first->rank < second->rank)
+        return 1;
+    else if (first->rank == second->rank)
+        return first->seqId < second->seqId;
+    else
+        return 0;
 }
 
 int sum_array(int *arr, int count) {
@@ -47,17 +60,15 @@ void detect_conflicts(IntervalsMap *IM, int num_files, const char* base_dir) {
     char path[512];
     size_t total_conflicts = 0;
 
-    sprintf(path, "%s/conflicts.txt", base_dir);
+    sprintf(path, "%s/conflicts.dat", base_dir);
     conflict_file = fopen(path, "w");
-    fprintf(conflict_file, "#rank,id,op1(fh,offset,count) "
-                           "rank,id,op2(fh,offset,count)\n");
 
     int idx, i, j;
     for(idx = 0; idx < num_files; idx++) {
 
         char *filename = IM[idx].filename;
         Interval *intervals = IM[idx].intervals;
-        fprintf(conflict_file, "#%d:%s\n", idx, filename);
+        //fprintf(conflict_file, "#%d:%s\n", idx, filename);
 
         // sort by offset
         qsort(intervals, IM[idx].num_intervals, sizeof(Interval), compare_by_offset);
@@ -86,20 +97,24 @@ void detect_conflicts(IntervalsMap *IM, int num_files, const char* base_dir) {
                 }
             }
 
-            if (conflicts.size() > 0) {
-                total_conflicts += conflicts.size();
-                fprintf(stdout, "rank:%4d, id:%10d, %5s(%5s,%12zu,%12zu) conflicts: %10ld\n",
-                        i1->rank,i1->seqId,i1->isRead?"read":"write",i1->mpifh,i1->offset,i1->count,
-                        conflicts.size());
-                fprintf(conflict_file, "%d,%d,%s,%s:",
-                        i1->rank,i1->seqId,i1->isRead?"r":"w",i1->mpifh);
+            size_t num_conflict_pairs = conflicts.size();
+            if (num_conflict_pairs > 0) {
+                total_conflicts += num_conflict_pairs;
+
+                fwrite(&i1->rank, sizeof(int), 1, conflict_file);
+                fwrite(&i1->seqId, sizeof(int), 1, conflict_file);
+                fwrite(&num_conflict_pairs, sizeof(size_t), 1, conflict_file);
+
+                // previously intervals were sorted by starting offset
+                // when saving it out, we sort it by sequence id
+                sort(conflicts.begin(), conflicts.end(), compare_by_index);
+
+                // write out all conflict pairs
                 for (vector<Interval*>::iterator it = conflicts.begin(); it!=conflicts.end(); ++it) {
                     i2 = *it;
-                    fprintf(conflict_file, "%d,%d,%s,%s%s",
-                            i2->rank,i2->seqId,i2->isRead?"r":"w",
-                            i2->mpifh,(it==conflicts.end()-1)?"":" ");
+                    fwrite(&i2->rank, sizeof(int), 1, conflict_file);
+                    fwrite(&i2->seqId, sizeof(int), 1, conflict_file);
                 }
-                fprintf(conflict_file, "\n");
                 conflicts.clear();
             }
 
@@ -109,7 +124,7 @@ void detect_conflicts(IntervalsMap *IM, int num_files, const char* base_dir) {
             if (total_conflicts > conflicts_cap)
                 goto done;
         } // end of one file
-    } 
+    }
 
 done:
     fclose(conflict_file);
@@ -123,7 +138,7 @@ int main(int argc, char* argv[]) {
     if (argc == 3)
         conflicts_cap = atoi(argv[2]);
 
-    int i, rank, num_files;
+    int i, num_files;
     IntervalsMap *IM = build_offset_intervals(&reader, &num_files);
 
     detect_conflicts(IM, num_files, argv[1]);

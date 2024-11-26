@@ -32,6 +32,8 @@
 #define RECORDER_MPIIO_TRACING              "RECORDER_MPIIO_TRACING"
 #define RECORDER_MPI_TRACING                "RECORDER_MPI_TRACING"
 #define RECORDER_HDF5_TRACING               "RECORDER_HDF5_TRACING"
+#define RECORDER_PNETCDF_TRACING            "RECORDER_PNETCDF_TRACING"
+#define RECORDER_NETCDF_TRACING             "RECORDER_NETCDF_TRACING"
 
 
 /**
@@ -49,6 +51,8 @@
  *
  */
 #define RECORDER_INTERCEPTOR_PROLOGUE_CORE(ret, func, real_args)                    \
+    /*printf("chen intercept %s\n", #func);*/\
+    /*fflush(stdout);*/\
     Record *record = recorder_malloc(sizeof(Record));                               \
     record->func_id = get_function_id_by_name(#func);                               \
     record->tid = recorder_gettid();                                                \
@@ -61,7 +65,7 @@
     if (sizeof(ret)) {                                                              \
         record->res = malloc(sizeof(ret));                                          \
         memcpy(record->res, &res, sizeof(ret));                                     \
-    } 
+    }
 
 // Fortran wrappers call this
 // ierr is of type MPI_Fint*, set only for fortran calls

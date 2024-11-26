@@ -45,6 +45,47 @@ else()
     message(STATUS, "HDF5 not found")
 endif()
 
+# PnetCDF is not a CMAKE project, we use find_path() to locate it
+# this requires users to set -DRECORDER_WITH_PNETCDF=/xx/xx/
+find_path(PNETCDF_INCLUDE_DIRS pnetcdf.h ${RECORDER_WITH_PNETCDF}/include)
+find_path(PNETCDF_LIBRARY_FOUND libpnetcdf.so ${RECORDER_WITH_PNETCDF}/lib)
+if(PNETCDF_INCLUDE_DIRS AND PNETCDF_LIBRARY_FOUND)
+    message("-- " "Found PnetCDF:" ${RECORDER_WITH_PNETCDF})
+    set(RECORDER_SRCS
+        ${CMAKE_CURRENT_SOURCE_DIR}/recorder-pnetcdf.c
+        ${RECORDER_SRCS}
+    )
+    include_directories(${PNETCDF_INCLUDE_DIRS})
+    set(PNETCDF_LIBRARIES ${RECORDER_WITH_PNETCDF}/lib/libpnetcdf.so)
+    set(RECORDER_EXT_INCLUDE_DEPENDENCIES ${PNETCDF_INCLUDE_DIRS}
+            ${RECORDER_EXT_INCLUDE_DEPENDENCIES})
+    set(RECORDER_EXT_LIB_DEPENDENCIES
+            ${PNETCDF_LIBRARIES} ${RECORDER_EXT_LIB_DEPENDENCIES})
+else()
+    message("-- " "PnetCDF not found. Will build Recorder without it.")
+endif()
+
+# Look for NetCDF
+# -DRECORDER_WITH_NETCDF=/xx/xx/
+find_path(NETCDF_INCLUDE_DIRS netcdf.h ${RECORDER_WITH_NETCDF}/include)
+find_path(NETCDF_LIBRARY_FOUND libnetcdf.so ${RECORDER_WITH_NETCDF}/lib)
+if(NETCDF_INCLUDE_DIRS AND NETCDF_LIBRARY_FOUND)
+    message("-- " "Found NetCDF:" ${RECORDER_WITH_NETCDF})
+    set(RECORDER_SRCS
+        ${CMAKE_CURRENT_SOURCE_DIR}/recorder-netcdf.c
+        ${RECORDER_SRCS}
+    )
+    include_directories(${NETCDF_INCLUDE_DIRS})
+    set(NETCDF_LIBRARIES ${RECORDER_WITH_NETCDF}/lib/libnetcdf.so)
+    set(RECORDER_EXT_INCLUDE_DEPENDENCIES ${NETCDF_INCLUDE_DIRS}
+            ${RECORDER_EXT_INCLUDE_DEPENDENCIES})
+    set(RECORDER_EXT_LIB_DEPENDENCIES
+            ${NETCDF_LIBRARIES} ${RECORDER_EXT_LIB_DEPENDENCIES})
+else()
+    message("-- " "NetCDF not found. Will build Recorder without it.")
+endif()
+
+
 find_package(MPI REQUIRED)
 if(MPI_FOUND)
     include_directories(${MPI_CXX_INCLUDE_DIRS})
@@ -129,6 +170,8 @@ target_compile_definitions(recorder
         PRIVATE $<$<BOOL:${HAVE___LXSTAT64}>:HAVE___LXSTAT64>
         PRIVATE $<$<BOOL:${HAVE___FXSTAT}>:HAVE___FXSTAT>
         PRIVATE $<$<BOOL:${HAVE___FXSTAT64}>:HAVE___FXSTAT64>
+        PRIVATE $<$<AND:$<BOOL:${PNETCDF_INCLUDE_DIRS}>,$<BOOL:${PNETCDF_LIBRARY_FOUND}>>:RECORDER_WITH_PNETCDF>
+        PRIVATE $<$<AND:$<BOOL:${NETCDF_INCLUDE_DIRS}>,$<BOOL:${NETCDF_LIBRARY_FOUND}>>:RECORDER_WITH_NETCDF>
         PRIVATE $<$<BOOL:${RECORDER_ENABLE_FCNTL_TRACE}>:RECORDER_ENABLE_FCNTL_TRACE>
         PRIVATE $<$<BOOL:${RECORDER_ENABLE_CUDA_TRACE}>:RECORDER_ENABLE_CUDA_TRACE>
         )

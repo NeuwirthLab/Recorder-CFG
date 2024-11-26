@@ -12,8 +12,10 @@ is currently under active development.
 
 -  MPI
 -  HDF5
+-  PnetCDF (optional) - Needed for PnetCDF tracing
 -  Arrow (optional) > 5.0.0 - Needed for building Parquet convertor.
 -  CUDA (optional) - Needed for CUDA kernels interception.
+
 
 *Note that Recorder and the applications you intend to trace must be
 compiled with the same version of HDF5 and MPI.*
@@ -43,6 +45,9 @@ need to use ``-DCMAKE_PREFIX_PATH`` to indicate their locations:
    cmake ..                                                          \
          -DCMAKE_INSTALL_PREFIX=[install location]                   \
          -DCMAKE_PREFIX_PATH=[semicolon separated depedencies dir]
+
+Recorder can also be built with PnetCDF to trace PnetCDF calls, use `-DRECORDER_WITH_PNETCDF=/path/to/pnetcdf/install`
+to build Recorder with the specified PnetCDF.
 
 (2) Intercepting ``fcntl()`` call:
 
