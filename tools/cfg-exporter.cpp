@@ -6,6 +6,9 @@
 #include <map>
 #include <filesystem>
 #include <regex>
+#include "reader.h"
+
+RecorderReader reader;
 
 
 template <typename KeyType>
@@ -118,16 +121,14 @@ IntervalTable<KeyType, ValueType> parseRanges(const std::string& ranges) {
     return table;
 }
 
-int read_filter(std::string &fpath) {
+std::vector<Filter<int, int>>* read_filter(std::string &fpath, std::vector<Filter<int, int>> *filters){
     std::ifstream ffile(fpath);
     if (!ffile.is_open()) {
         std::cerr << "Error: Unable to open file at " << fpath << "\n";
-        return -1;
+        return nullptr;
     }
 
     std::string fline;
-    std::vector<Filter<int, int>> filters;
-
     while (std::getline(ffile, fline)) {
         if (fline.empty()) continue; // Skip empty lines
 
@@ -154,20 +155,29 @@ int read_filter(std::string &fpath) {
             }
         }
 
-        filters.emplace_back(func_name, indices);
+        filters->emplace_back(func_name, indices);
     }
 
     std::cout << "Successfully processed filters.\n";
-    return 0;
+    return filters;
 }
 
 int main(int argc, char* argv[]) {
-    // std::vector<Filter<int, std::string>> *filters = nullptr;
-    MultiIndexIntervalTable<int, std::string> multiIndexTable;
+    std::vector<Filter<int, int>> filters;
+
     std::string fpath = "/g/g90/zhu22/repos/Recorder-CFG/tools/filters.txt";
-    int i = read_filter(fpath);
+    read_filter(fpath, &filters);
+
+    std::string rpath = "/g/g90/zhu22/iopattern/recorder-20241017/121628.414-ruby20-zhu22-ior-2599384";
+    recorder_init_reader(rpath.c_str(), &reader);
+    for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
+        std::cout << "Rank: " << rank << std::endl;
+        printf("\r[Recorder] rank %d finished\n", rank);
+    }
+
 
 /*
+    MultiIndexIntervalTable<int, std::string> multiIndexTable;
     multiIndexTable.insert("0", {1, 5}, "2");
     multiIndexTable.insert("0", {5, 10}, "7");
     multiIndexTable.insert("0", {10, 15}, "12");
