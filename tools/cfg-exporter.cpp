@@ -262,7 +262,7 @@ void printRules(RuleHash *rule) {
 
 }
 
-void applyFilter(Record* record, RecorderReader *reader, std::vector<Filter<int, int>> *filters){
+void applyFilterToRecord(Record* record, RecorderReader *reader, std::vector<Filter<int, int>> *filters){
     std::string func_name = recorder_get_func_name(reader, record);
     std::vector<std::string> args = charPointerPointerArrayToList(record->args, record->arg_count);
     for(auto &filter:*filters){
@@ -287,16 +287,44 @@ void applyFilter(Record* record, RecorderReader *reader, std::vector<Filter<int,
                 arg_cnt++;
             }
             if(arg_cnt == args_list.size()){
-                record->args = static_cast<char**>(malloc(sizeof (char*) * args_list.size()));
+                record->args = static_cast<char**>(malloc(sizeof(char*) * args_list.size()));
                 for(int i=0; i<args_list.size(); i++){
                     record->args[i] = strdup(args_list[i].c_str());
                 }
                 record->arg_count = args_list.size();
+                for(int i=0; i< record->arg_count; i++){
+                    std::cout << record->args[i] << std::endl;
+                }
             }
         }
     }
 
 }
+
+/*
+void rewriteRecord(Record *record) {
+    int key_len;
+    char* key = compose_cs_key(record, &key_len);
+
+    CallSignature *entry = NULL;
+    HASH_FIND(hh, logger.cst, key, key_len, entry);
+    if(entry) {                         // Found
+        entry->count++;
+        recorder_free(key, key_len);
+    } else {                            // Not exist, add to hash table
+        entry = (CallSignature*) recorder_malloc(sizeof(CallSignature));
+        entry->key = key;
+        entry->key_len = key_len;
+        entry->rank = logger.rank;
+        entry->terminal_id = logger.current_cfg_terminal++;
+        entry->count = 1;
+        HASH_ADD_KEYPTR(hh, logger.cst, entry->key, entry->key_len, entry);
+    }
+
+    append_terminal(&logger.cfg, entry->terminal_id, 1);
+    logger.num_records++;
+}
+*/
 
 void rule_application(RecorderReader* reader, CFG* cfg, CST* cst, int rule_id, int free_record, std::vector<Filter<int, int>> *filters) {
     RuleHash *rule = NULL;
@@ -310,7 +338,8 @@ void rule_application(RecorderReader* reader, CFG* cfg, CST* cst, int rule_id, i
         if (sym_val >= TERMINAL_START_ID) { // terminal
             for(int j = 0; j < sym_exp; j++) {
                 Record* record = reader_cs_to_record(&(cst->cs_list[sym_val]));
-                applyFilter(record, reader, filters);
+                applyFilterToRecord(record, reader, filters);
+
 /*                std::string func_name = recorder_get_func_name(reader, record);
                 std::string args = charPointerArrayToString(record->args, record->arg_count);
 
