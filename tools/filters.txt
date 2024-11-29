@@ -1,6 +1,6 @@
 close 0
 fclose 0
-open64 0 1
+open64 1
 open 0 1
 fopen64 0 1
 fopen 0 1
