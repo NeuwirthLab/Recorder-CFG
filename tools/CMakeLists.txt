@@ -60,9 +60,9 @@ add_executable(recorder-summary recorder-summary.c)
 target_link_libraries(recorder-summary reader)
 add_dependencies(recorder-summary reader)
 
-add_executable(cfg-exporter cfg-exporter.cpp)
-target_link_libraries(cfg-exporter reader)
-add_dependencies(cfg-exporter reader)
+add_executable(recorder-filter recorder-filter.cpp)
+target_link_libraries(recorder-filter reader recorder)
+add_dependencies(recorder-filter reader recorder)
 
 
 if(RECORDER_ENABLE_PARQUET)
