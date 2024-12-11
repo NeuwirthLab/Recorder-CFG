@@ -6,9 +6,13 @@
 #include <map>
 #include <filesystem>
 #include <regex>
+#include <math.h>
+extern "C" {
 #include "reader.h"
+#include "recorder-sequitur.h"
+}
 
-RecorderReader reader;
+static char formatting_record[32];
 
 
 template <typename KeyType>
@@ -91,18 +95,23 @@ public:
 };
 
 
+
 std::vector<std::string> splitStringBySpace(const std::string& input) {
     std::vector<std::string> result;
     std::istringstream stream(input);
     std::string token;
-
     while (std::getline(stream, token, ' ')) {
         result.push_back(token);
     }
-
     return result;
 }
 
+/**
+ * TODO: no need to read a text file and process this mannually.
+ * It would be easier just writing filters in a json file
+ * and use an existing library to read; it will automatically
+ * handles the strings, floats and arrays.
+ */
 std::pair<std::string, std::string> splitIntoNumberAndRanges(const std::string& input) {
     std::regex pattern(R"((\d+)\[(.*)\])"); // Matches format "<number>[<ranges>]"
     std::smatch match;
@@ -130,7 +139,11 @@ IntervalTable<KeyType, ValueType> parseRanges(const std::string& ranges) {
     return table;
 }
 
-std::vector<Filter<int, int>>* read_filter(std::string &fpath, std::vector<Filter<int, int>> *filters){
+/**
+ * TODO: the second argument is in/out argument
+ *  then why do you need to return it?
+ */
+std::vector<Filter<int, int>>* read_filters(std::string &fpath, std::vector<Filter<int, int>> *filters){
     std::ifstream ffile(fpath);
     if (!ffile.is_open()) {
         std::cerr << "Error: Unable to open file at " << fpath << "\n";
@@ -167,73 +180,8 @@ std::vector<Filter<int, int>>* read_filter(std::string &fpath, std::vector<Filte
         filters->emplace_back(func_name, indices);
     }
 
-    std::cout << "Successfully processed filters.\n";
+    std::cout << "Successfully read filters.\n";
     return filters;
-}
-
-
-CST* reader_get_cst(RecorderReader* reader, int rank) {
-    CST* cst = reader->csts[rank];
-    return cst;
-}
-
-CFG* reader_get_cfg(RecorderReader* reader, int rank) {
-    CFG* cfg;
-    if (reader->metadata.interprocess_compression)
-        cfg = reader->cfgs[reader->ug_ids[rank]];
-    else
-        cfg = reader->cfgs[rank];
-    return cfg;
-}
-
-
-Record* reader_cs_to_record(CallSignature *cs) {
-
-    Record *record = static_cast<Record *>(malloc(sizeof(Record)));
-
-    char* key = static_cast<char *>(cs->key);
-
-    int pos = 0;
-    memcpy(&record->tid, key+pos, sizeof(pthread_t));
-    pos += sizeof(pthread_t);
-    memcpy(&record->func_id, key+pos, sizeof(record->func_id));
-    pos += sizeof(record->func_id);
-    memcpy(&record->call_depth, key+pos, sizeof(record->call_depth));
-    pos += sizeof(record->call_depth);
-    memcpy(&record->arg_count, key+pos, sizeof(record->arg_count));
-    pos += sizeof(record->arg_count);
-
-    record->args = static_cast<char **>(malloc(sizeof(char *) * record->arg_count));
-
-    int arg_strlen;
-    memcpy(&arg_strlen, key+pos, sizeof(int));
-    pos += sizeof(int);
-
-    char* arg_str = key+pos;
-    int ai = 0;
-    int start = 0;
-    for(int i = 0; i < arg_strlen; i++) {
-        if(arg_str[i] == ' ') {
-            record->args[ai++] = strndup(arg_str+start, (i-start));
-            start = i + 1;
-        }
-    }
-
-    assert(ai == record->arg_count);
-    return record;
-}
-
-std::string charPointerArrayToString(char** charArray, int size) {
-    std::string result;
-    for (int i = 0; i < size; ++i) {
-        if (charArray[i] != nullptr) {
-            result += std::string(charArray[i]);
-            if (i < size - 1) {
-                result += " ";
-            }
-        }
-    }
-    return result;
 }
 
 std::vector<std::string> charPointerPointerArrayToList(char** charArray, int size) {
@@ -246,23 +194,7 @@ std::vector<std::string> charPointerPointerArrayToList(char** charArray, int siz
     return args_list;
 }
 
-
-
-
-
-#define TERMINAL_START_ID 0
-
-void printRules(RuleHash *rule) {
-    for (int i = 0; i < rule->symbols; ++i) {
-        if (rule->rule_body[2 * i + 0] >= TERMINAL_START_ID) {
-            std::cout << "Rule" << rule->rule_id << " : " << rule->rule_body[2 * i + 0] << "^"
-                      << rule->rule_body[2 * i + 1] << std::endl;
-        }
-    }
-
-}
-
-void applyFilterToRecord(Record* record, RecorderReader *reader, std::vector<Filter<int, int>> *filters){
+void apply_filter_to_record(Record* record, RecorderReader *reader, std::vector<Filter<int, int>> *filters){
     std::string func_name = recorder_get_func_name(reader, record);
     std::vector<std::string> args = charPointerPointerArrayToList(record->args, record->arg_count);
     for(auto &filter:*filters){
@@ -276,7 +208,7 @@ void applyFilterToRecord(Record* record, RecorderReader *reader, std::vector<Fil
                 if (intervalTable.data.empty()){
                     // no intervals defined for this arg
                     args_list.push_back(args[index]);
-                }else{
+                } else {
                     for( auto &interval : intervalTable.data){
                         //go through the intervals and check if the record->args[i] is in any of the defined intervals
                         if(std::stoi(args[index]) >= interval.first.lower && std::stoi(args[index]) < interval.first.upper){
@@ -298,95 +230,124 @@ void applyFilterToRecord(Record* record, RecorderReader *reader, std::vector<Fil
             }
         }
     }
-
 }
 
-/*
-void rewriteRecord(Record *record) {
+
+
+
+
+
+
+
+/**
+ * helper structure for passing arguments
+ * to the iterate_record() function
+ */
+typedef struct IterArg_t {
+    int rank;
+    RecorderReader* reader;
+    CallSignature*  global_cst;
+    Grammar*        local_cfg;
+    // TODO: encapsulate filters to make it cleaner
+    std::vector<Filter<int,int>>* filters;
+} IterArg;
+
+
+/**
+ * This function addes one record to the CFG and CST
+ * the implementation is identical to that of the
+ * recorder-logger.c
+ */
+static int current_cfg_terminal = 0;
+void grow_cst_cfg(Grammar* cfg, CallSignature* cst, Record* record) {
     int key_len;
     char* key = compose_cs_key(record, &key_len);
 
     CallSignature *entry = NULL;
-    HASH_FIND(hh, logger.cst, key, key_len, entry);
+    HASH_FIND(hh, cst, key, key_len, entry);
     if(entry) {                         // Found
         entry->count++;
-        recorder_free(key, key_len);
+        free(key);
     } else {                            // Not exist, add to hash table
-        entry = (CallSignature*) recorder_malloc(sizeof(CallSignature));
+        entry = (CallSignature*) malloc(sizeof(CallSignature));
         entry->key = key;
         entry->key_len = key_len;
-        entry->rank = logger.rank;
-        entry->terminal_id = logger.current_cfg_terminal++;
+        entry->rank = 0;
+        entry->terminal_id = current_cfg_terminal++;
         entry->count = 1;
-        HASH_ADD_KEYPTR(hh, logger.cst, entry->key, entry->key_len, entry);
+        HASH_ADD_KEYPTR(hh, cst, entry->key, entry->key_len, entry);
     }
 
-    append_terminal(&logger.cfg, entry->terminal_id, 1);
-    logger.num_records++;
+    append_terminal(cfg, entry->terminal_id, 1);
 }
-*/
 
-void rule_application(RecorderReader* reader, CFG* cfg, CST* cst, int rule_id, int free_record, std::vector<Filter<int, int>> *filters) {
-    RuleHash *rule = NULL;
-    HASH_FIND_INT(cfg->cfg_head, &rule_id, rule);
-    assert(rule != NULL);
-    //printRules(rule);
-    for(int i = 0; i < rule->symbols; i++) {
-        int sym_val = rule->rule_body[2*i+0];
-        int sym_exp = rule->rule_body[2*i+1];
-        std::cout << sym_val << "^"<<sym_exp << std::endl;
-        if (sym_val >= TERMINAL_START_ID) { // terminal
-            for(int j = 0; j < sym_exp; j++) {
-                Record* record = reader_cs_to_record(&(cst->cs_list[sym_val]));
-                applyFilterToRecord(record, reader, filters);
+/**
+ * Function that processes one record at a time
+ * The pointer of this function needs to be
+ * passed to the recorder_decode_records() call.
+ *
+ * in this function:
+ * 1. we apply the filters
+ * 2. then build the cst and cfg
+ */
+void iterate_record(Record* record, void* arg) {
 
-/*                std::string func_name = recorder_get_func_name(reader, record);
-                std::string args = charPointerArrayToString(record->args, record->arg_count);
+    IterArg *ia = (IterArg*) arg;
 
-                std::cout << func_name << " "<<args << std::endl;
-                // std::cout << "record->tid: " << record->func_id << std::endl;
-                */
-                if(free_record)
-                    recorder_free_record(record);
-            }
-        } else {                            // non-terminal (i.e., rule)
-            for(int j = 0; j < sym_exp; j++)
-                rule_application(reader, cfg, cst, sym_val, free_record, filters);
-        }
+    bool user_func = (record->func_id == RECORDER_USER_FUNCTION);
+
+    const char* func_name = recorder_get_func_name(ia->reader, record);
+
+    fprintf(stdout, formatting_record, record->tstart, record->tend, // record->tid
+                func_name, record->call_depth, recorder_get_func_type(ia->reader, record));
+
+    for(int arg_id = 0; !user_func && arg_id < record->arg_count; arg_id++) {
+        char *arg = record->args[arg_id];
+        fprintf(stdout, " %s", arg);
     }
+    fprintf(stdout, " )\n");
+
+    // apply fiter to the record
+    // then add it to the cst and cfg.
+    apply_filter_to_record(record, ia->reader, ia->filters);
+    grow_cst_cfg(ia->local_cfg, ia->global_cst, record);
 }
 
 
 int main(int argc, char* argv[]) {
     std::vector<Filter<int, int>> filters;
 
-    std::string fpath = "/g/g90/zhu22/repos/Recorder-CFG/tools/filters.txt";
-    read_filter(fpath, &filters);
+    // Recorder trace directory
+    // TODO: read it from command line argument
+    std::string trace_dir = "/g/g90/zhu22/iopattern/recorder-20241007/170016.899-ruby22-zhu22-ior-1614057/";
 
-    std::string rpath = "/g/g90/zhu22/iopattern/recorder-20241007/170016.899-ruby22-zhu22-ior-1614057/";
-    recorder_init_reader(rpath.c_str(), &reader);
+    // filter file path
+    // TODO: read it from command line argument
+    std::string filter_path = "/g/g90/zhu22/repos/Recorder-CFG/tools/filters.txt";
+    read_filters(filter_path, &filters);
+
+    RecorderReader reader;
+    CallSignature  global_cst;
+
+    // For debug purpose, can delete later
+    int decimal =  log10(1 / reader.metadata.time_resolution);
+    sprintf(formatting_record, "%%.%df %%.%df %%s %%d %%d (", decimal, decimal);
+
+    // Go through each rank's records
+    recorder_init_reader(trace_dir.c_str(), &reader);
     for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
-        std::cout << "Rank: " << rank << std::endl;
-        CST* cst = reader_get_cst(&reader, rank);
-        CFG* cfg = reader_get_cfg(&reader, rank);
-        rule_application(&reader, cfg, cst, -1, 1, &filters);
+        Grammar local_cfg;
 
+        IterArg arg;
+        arg.rank       = rank;
+        arg.reader     = &reader;
+        arg.local_cfg  = &local_cfg;
+        arg.global_cst = &global_cst;
+        arg.filters    = &filters;
+
+        // this call iterates through all records of one rank
+        // each record is processed by the iterate_record() function
+        recorder_decode_records(&reader, rank, iterate_record, &arg);
     }
-
-
-/*
-    MultiIndexIntervalTable<int, std::string> multiIndexTable;
-    multiIndexTable.insert("0", {1, 5}, "2");
-    multiIndexTable.insert("0", {5, 10}, "7");
-    multiIndexTable.insert("0", {10, 15}, "12");
-
-    // Insert data into index "B"
-    multiIndexTable.insert("1", {1, 3}, "2");
-    multiIndexTable.insert("1", {3, 7}, "4");
-    multiIndexTable.insert("1", {7, 10}, "9");
-
-    std::cout << "Index A contents:\n";
-    multiIndexTable.printIntervals("0");
-    std::cout << "Index B contents:\n";
-    multiIndexTable.printIntervals("1");*/
+    recorder_free_reader(&reader);
 }
