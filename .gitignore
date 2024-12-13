@@ -96,6 +96,7 @@ tools/conflict_detector
 tools/recorder2text
 tools/metaops_checker
 tools/figures/
+tools/filters*
 install
 *.html
 

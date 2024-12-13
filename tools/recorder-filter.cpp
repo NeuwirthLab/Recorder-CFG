@@ -6,6 +6,7 @@
 #include <map>
 #include <filesystem>
 #include <regex>
+#include <getopt.h>
 #include <math.h>
 extern "C" {
 #include "reader.h"
@@ -94,6 +95,77 @@ public:
             : func_name(name), indices(miit) {}
 };
 
+template <typename KeyType, typename ValueType>
+class Filters {
+private:
+    std::vector<Filter<KeyType, ValueType>> filters;
+
+public:
+    void addFilter(const Filter<KeyType, ValueType>& filter) {
+        filters.push_back(filter);
+    }
+/*
+    void addFilter(const std::string& name, const MultiIndexIntervalTable<KeyType, ValueType>& miit) {
+        filters.emplace_back(name, miit);
+    }
+*/
+    const Filter<KeyType, ValueType>& getFilter(size_t index) const {
+        if (index < filters.size()) {
+            return filters[index];
+        } else {
+            throw std::out_of_range("Index out of range");
+        }
+    }
+
+    size_t size() const {
+        return filters.size();
+    }
+
+    // in case for accessing the underlying vector
+    const std::vector<Filter<KeyType, ValueType>>& getFilters() const {
+        return filters;
+    }
+
+    auto begin() {
+        return filters.begin();
+    }
+
+    auto end() {
+        return filters.end();
+    }
+
+};
+
+
+void parseArguments(int argc, char** argv, std::string& trace_dir, std::string& filter_path) {
+    const char* const short_opts = "t:f:h";
+    const option long_opts[] = {
+            {"trace-dir", required_argument, nullptr, 't'},
+            {"filter-path", required_argument, nullptr, 'f'},
+            {nullptr, no_argument, nullptr, 0}
+    };
+
+    while (true) {
+        const auto opt = getopt_long(argc, argv, short_opts, long_opts, nullptr);
+        if (-1 == opt) break;
+        switch (opt) {
+            case 't':
+                trace_dir = optarg;
+                break;
+
+            case 'f':
+                filter_path = optarg;
+                break;
+
+            default:
+                std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
+                          << "  -t, --trace-dir    Set the trace directory\n"
+                          << "  -f, --filter-path  Set the filter file path\n"
+                          << "  -h, --help         Display this help message\n";
+                exit(0);
+        }
+    }
+}
 
 
 std::vector<std::string> splitStringBySpace(const std::string& input) {
@@ -139,15 +211,11 @@ IntervalTable<KeyType, ValueType> parseRanges(const std::string& ranges) {
     return table;
 }
 
-/**
- * TODO: the second argument is in/out argument
- *  then why do you need to return it?
- */
-std::vector<Filter<int, int>>* read_filters(std::string &fpath, std::vector<Filter<int, int>> *filters){
+
+void read_filters(std::string &fpath, Filters<int, int> *filters){
     std::ifstream ffile(fpath);
     if (!ffile.is_open()) {
         std::cerr << "Error: Unable to open file at " << fpath << "\n";
-        return nullptr;
     }
 
     std::string fline;
@@ -177,11 +245,9 @@ std::vector<Filter<int, int>>* read_filters(std::string &fpath, std::vector<Filt
             }
         }
 
-        filters->emplace_back(func_name, indices);
+        filters->addFilter(Filter(func_name, indices));
     }
-
     std::cout << "Successfully read filters.\n";
-    return filters;
 }
 
 std::vector<std::string> charPointerPointerArrayToList(char** charArray, int size) {
@@ -194,7 +260,7 @@ std::vector<std::string> charPointerPointerArrayToList(char** charArray, int siz
     return args_list;
 }
 
-void apply_filter_to_record(Record* record, RecorderReader *reader, std::vector<Filter<int, int>> *filters){
+void apply_filter_to_record(Record* record, RecorderReader *reader, Filters<int, int> *filters){
     std::string func_name = recorder_get_func_name(reader, record);
     std::vector<std::string> args = charPointerPointerArrayToList(record->args, record->arg_count);
     for(auto &filter:*filters){
@@ -234,11 +300,6 @@ void apply_filter_to_record(Record* record, RecorderReader *reader, std::vector<
 
 
 
-
-
-
-
-
 /**
  * helper structure for passing arguments
  * to the iterate_record() function
@@ -248,8 +309,7 @@ typedef struct IterArg_t {
     RecorderReader* reader;
     CallSignature*  global_cst;
     Grammar*        local_cfg;
-    // TODO: encapsulate filters to make it cleaner
-    std::vector<Filter<int,int>>* filters;
+    Filters<int,int>* filters;
 } IterArg;
 
 
@@ -314,16 +374,14 @@ void iterate_record(Record* record, void* arg) {
 }
 
 
-int main(int argc, char* argv[]) {
-    std::vector<Filter<int, int>> filters;
-
+int main(int argc, char** argv) {
     // Recorder trace directory
-    // TODO: read it from command line argument
     std::string trace_dir = "/g/g90/zhu22/iopattern/recorder-20241007/170016.899-ruby22-zhu22-ior-1614057/";
-
     // filter file path
-    // TODO: read it from command line argument
     std::string filter_path = "/g/g90/zhu22/repos/Recorder-CFG/tools/filters.txt";
+    parseArguments(argc, argv, trace_dir, filter_path);
+
+    Filters<int, int> filters;
     read_filters(filter_path, &filters);
 
     RecorderReader reader;
