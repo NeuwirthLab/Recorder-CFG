@@ -14,6 +14,7 @@ extern "C" {
 }
 
 static char formatting_record[32];
+static CallSignature*  global_cst = NULL;
 
 
 template <typename KeyType>
@@ -85,7 +86,7 @@ private:
 };
 
 template <typename KeyType, typename ValueType>
-class Filter{
+class Filter {
 public:
     std::string func_name;
     MultiIndexIntervalTable<KeyType, ValueType> indices;
@@ -250,49 +251,42 @@ void read_filters(std::string &fpath, Filters<int, int> *filters){
     std::cout << "Successfully read filters.\n";
 }
 
-std::vector<std::string> charPointerPointerArrayToList(char** charArray, int size) {
-    std::vector<std::string> args_list;
-    for(int i= 0; i< size; i++){
-        if (charArray[i] != nullptr){
-            args_list.emplace_back(charArray[i]);
-        }
-    }
-    return args_list;
-}
+void apply_filter_to_record(Record* record, Record* new_record, RecorderReader *reader, Filters<int, int> *filters){
 
-void apply_filter_to_record(Record* record, RecorderReader *reader, Filters<int, int> *filters){
+    // duplicate the original record and then
+    // make modifications to the new record
+    memcpy(new_record, record, sizeof(Record));
+
     std::string func_name = recorder_get_func_name(reader, record);
-    std::vector<std::string> args = charPointerPointerArrayToList(record->args, record->arg_count);
-    for(auto &filter:*filters){
-        if(filter.func_name == func_name){
-            std::vector<std::string> args_list;
-            int arg_cnt = 0;
-            for(auto it = filter.indices.begin(); it != filter.indices.end(); ++it){
+    for(auto &filter:*filters) {
+        if(filter.func_name == func_name) {
+            std::vector<std::string> new_args;
+
+            // TODO: should the filters include the same number of incides as the actual call?
+            for(auto it = filter.indices.begin(); it != filter.indices.end(); ++it) {
                 // for each index in the filter
                 int index = stoi(it->first);
                 auto &intervalTable = it->second;
-                if (intervalTable.data.empty()){
-                    // no intervals defined for this arg
-                    args_list.push_back(args[index]);
-                } else {
-                    for( auto &interval : intervalTable.data){
-                        //go through the intervals and check if the record->args[i] is in any of the defined intervals
-                        if(std::stoi(args[index]) >= interval.first.lower && std::stoi(args[index]) < interval.first.upper){
-                            args_list.push_back(std::to_string(interval.second));
-                        }
+
+                // Clustering
+                int arg_modified = 0;
+                for(auto &interval : intervalTable.data) {
+                    if(atoi(record->args[index]) >= interval.first.lower && atoi(record->args[index]) < interval.first.upper) {
+                        new_args.push_back(std::to_string(interval.second));
+                        arg_modified = 1;
+                        break;
                     }
                 }
-                arg_cnt++;
+
+                if (!arg_modified)
+                    new_args.push_back(record->args[index]);
             }
-            if(arg_cnt == args_list.size()){
-                record->args = static_cast<char**>(malloc(sizeof(char*) * args_list.size()));
-                for(int i=0; i<args_list.size(); i++){
-                    record->args[i] = strdup(args_list[i].c_str());
-                }
-                record->arg_count = args_list.size();
-                for(int i=0; i< record->arg_count; i++){
-                    std::cout << record->args[i] << std::endl;
-                }
+
+            // Overwrite the orginal record with modified args
+            new_record->arg_count = new_args.size();
+            new_record->args = (char**) malloc(sizeof(char*) * new_record->arg_count);
+            for(int i = 0; i < new_record->arg_count; i++) {
+                new_record->args[i] = strdup(new_args[i].c_str());
             }
         }
     }
@@ -307,8 +301,7 @@ void apply_filter_to_record(Record* record, RecorderReader *reader, Filters<int,
 typedef struct IterArg_t {
     int rank;
     RecorderReader* reader;
-    CallSignature*  global_cst;
-    Grammar*        local_cfg;
+    Grammar         local_cfg;
     Filters<int,int>* filters;
 } IterArg;
 
@@ -342,6 +335,27 @@ void grow_cst_cfg(Grammar* cfg, CallSignature* cst, Record* record) {
 }
 
 /**
+ * This is a helper (debug) function that prints out
+ * the recorded function call
+ */
+static void print_record(Record* record, RecorderReader *reader) {
+    int decimal =  log10(1 / reader->metadata.time_resolution);
+    sprintf(formatting_record, "%%.%df %%.%df %%s %%d %%d (", decimal, decimal);
+
+    bool user_func = (record->func_id == RECORDER_USER_FUNCTION);
+    const char* func_name = recorder_get_func_name(reader, record);
+
+    fprintf(stdout, formatting_record, record->tstart, record->tend, // record->tid
+                func_name, record->call_depth);
+
+    for(int arg_id = 0; !user_func && arg_id < record->arg_count; arg_id++) {
+        char *arg = record->args[arg_id];
+        fprintf(stdout, " %s", arg);
+    }
+    fprintf(stdout, " )\n");
+}
+
+/**
  * Function that processes one record at a time
  * The pointer of this function needs to be
  * passed to the recorder_decode_records() call.
@@ -354,58 +368,60 @@ void iterate_record(Record* record, void* arg) {
 
     IterArg *ia = (IterArg*) arg;
 
-    bool user_func = (record->func_id == RECORDER_USER_FUNCTION);
-
-    const char* func_name = recorder_get_func_name(ia->reader, record);
-
-    fprintf(stdout, formatting_record, record->tstart, record->tend, // record->tid
-                func_name, record->call_depth, recorder_get_func_type(ia->reader, record));
-
-    for(int arg_id = 0; !user_func && arg_id < record->arg_count; arg_id++) {
-        char *arg = record->args[arg_id];
-        fprintf(stdout, " %s", arg);
-    }
-    fprintf(stdout, " )\n");
+    // debug purpose; print out the original record
+    printf("old:");
+    print_record(record, ia->reader);
 
     // apply fiter to the record
     // then add it to the cst and cfg.
-    apply_filter_to_record(record, ia->reader, ia->filters);
-    grow_cst_cfg(ia->local_cfg, ia->global_cst, record);
+    Record new_record;
+    apply_filter_to_record(record, &new_record, ia->reader, ia->filters);
+
+    // debug purpose; print out the modified record
+    printf("new:");
+    print_record(&new_record, ia->reader);
+
+    grow_cst_cfg(&ia->local_cfg, global_cst, &new_record);
 }
 
 
 int main(int argc, char** argv) {
     // Recorder trace directory
-    std::string trace_dir = "/g/g90/zhu22/iopattern/recorder-20241007/170016.899-ruby22-zhu22-ior-1614057/";
+    std::string trace_dir = "/p/lustre2/wang116/corona/sources/Recorder-CFG/test/recorder-20241223/135530.813-corona171-wang116-a.out-756755";
     // filter file path
-    std::string filter_path = "/g/g90/zhu22/repos/Recorder-CFG/tools/filters.txt";
+    std::string filter_path = "/p/lustre2/wang116/corona/sources/Recorder-CFG/test/recorder-20241223/135530.813-corona171-wang116-a.out-756755/filter.txt";
     parseArguments(argc, argv, trace_dir, filter_path);
 
     Filters<int, int> filters;
     read_filters(filter_path, &filters);
 
     RecorderReader reader;
-    CallSignature  global_cst;
+    recorder_init_reader(trace_dir.c_str(), &reader);
 
-    // For debug purpose, can delete later
-    int decimal =  log10(1 / reader.metadata.time_resolution);
-    sprintf(formatting_record, "%%.%df %%.%df %%s %%d %%d (", decimal, decimal);
+
+    // Prepare the arguments to pass to each rank
+    // when iterating local records
+    IterArg *iter_args = (IterArg*) malloc(sizeof(IterArg));
+    for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
+        iter_args[rank].rank       = rank;
+        iter_args[rank].reader     = &reader;
+        iter_args[rank].filters    = &filters;
+        // initialize local CFG
+        sequitur_init(&(iter_args[rank].local_cfg));
+    }
 
     // Go through each rank's records
-    recorder_init_reader(trace_dir.c_str(), &reader);
     for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
-        Grammar local_cfg;
-
-        IterArg arg;
-        arg.rank       = rank;
-        arg.reader     = &reader;
-        arg.local_cfg  = &local_cfg;
-        arg.global_cst = &global_cst;
-        arg.filters    = &filters;
 
         // this call iterates through all records of one rank
         // each record is processed by the iterate_record() function
-        recorder_decode_records(&reader, rank, iterate_record, &arg);
+        recorder_decode_records(&reader, rank, iterate_record, &(iter_args[rank]));
     }
+
+    // At this point we should have built the global cst and each
+    // rank's local cfg. Now let's write them out.
+
+
+
     recorder_free_reader(&reader);
 }
