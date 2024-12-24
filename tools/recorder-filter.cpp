@@ -8,6 +8,7 @@
 #include <regex>
 #include <getopt.h>
 #include <math.h>
+#include <zlib.h>
 extern "C" {
 #include "reader.h"
 #include "recorder-sequitur.h"
@@ -292,8 +293,6 @@ void apply_filter_to_record(Record* record, Record* new_record, RecorderReader *
     }
 }
 
-
-
 /**
  * helper structure for passing arguments
  * to the iterate_record() function
@@ -305,6 +304,126 @@ typedef struct IterArg_t {
     Filters<int,int>* filters;
 } IterArg;
 
+
+/**
+ * this function is directly copied from recorder/lib/recorder-cst-cfg.c
+ * to avoid adding dependency to the entire recorder library.
+ * TODO: think a better way to reuse this code
+ */
+char* serialize_cst(CallSignature *cst, size_t *len) {
+    *len = sizeof(int);
+
+    CallSignature *entry, *tmp;
+    HASH_ITER(hh, cst, entry, tmp) {
+        *len = *len + entry->key_len + sizeof(int)*3 + sizeof(unsigned);
+    }
+
+    int entries = HASH_COUNT(cst);
+    char *res = (char*) malloc(*len);
+    char *ptr = res;
+
+    memcpy(ptr, &entries, sizeof(int));
+    ptr += sizeof(int);
+
+    HASH_ITER(hh, cst, entry, tmp) {
+        memcpy(ptr, &entry->terminal_id, sizeof(int));
+        ptr = ptr + sizeof(int);
+        memcpy(ptr, &entry->rank, sizeof(int));
+        ptr = ptr + sizeof(int);
+        memcpy(ptr, &entry->key_len, sizeof(int));
+        ptr = ptr + sizeof(int);
+        memcpy(ptr, &entry->count, sizeof(unsigned));
+        ptr = ptr + sizeof(unsigned);
+        memcpy(ptr, entry->key, entry->key_len);
+        ptr = ptr + entry->key_len;
+    }
+
+    return res;
+}
+
+/**
+ * this function is directly copied from recorder/lib/recorder-utils.c
+ * to avoid adding dependency to the entire recorder library.
+ * TODO: think a better way to reuse this code
+ */
+void recorder_write_zlib(unsigned char* buf, size_t buf_size, FILE* out_file) {
+    // Always write two size_t (compressed_size and decopmressed_size)
+    // before writting the the compressed data.
+    // This allows easier post-processing.
+    long off = ftell(out_file);
+    size_t compressed_size   = 0;
+    size_t decompressed_size = buf_size;
+    fwrite(&compressed_size, sizeof(size_t), 1, out_file);
+    fwrite(&decompressed_size, sizeof(size_t), 1, out_file);
+
+    int ret;
+    unsigned have;
+    z_stream strm;
+
+    unsigned char out[buf_size];
+
+    /* allocate deflate state */
+    strm.zalloc = Z_NULL;
+    strm.zfree  = Z_NULL;
+    strm.opaque = Z_NULL;
+    ret = deflateInit(&strm, Z_DEFAULT_COMPRESSION);
+    // ret = deflateInit(&strm, Z_BEST_COMPRESSION);
+    if (ret != Z_OK) {
+        printf("[recorder-filter] fatal error: can't initialize zlib.\n");
+        return;
+    }
+
+    strm.avail_in = buf_size;
+    strm.next_in  = buf;
+    /* run deflate() on input until output buffer not full, finish
+       compression if all of source has been read in */
+    do {
+        strm.avail_out = buf_size;
+        strm.next_out = out;
+        ret = deflate(&strm, Z_FINISH);    /* no bad return value */
+        assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
+        have = buf_size - strm.avail_out;
+        compressed_size += have;
+        if (fwrite(out, 1, have, out_file) != have) {
+            printf("[recorder-filter] fatal error: zlib write out error.");
+            (void)deflateEnd(&strm);
+            return;
+        }
+    } while (strm.avail_out == 0);
+    assert(strm.avail_in == 0);         /* all input will be used */
+
+    /* clean up and return */
+    (void)deflateEnd(&strm);
+
+    fseek(out_file, off, SEEK_SET);
+    fwrite(&compressed_size, sizeof(size_t), 1, out_file);
+    fwrite(&decompressed_size, sizeof(size_t), 1, out_file);
+    fseek(out_file, compressed_size, SEEK_CUR);
+}
+
+void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
+
+    for(int rank = 0; rank < reader->metadata.total_ranks; rank++) {
+        char filename[1024] = {0};
+        sprintf(filename, "./tmp/%d.cfg", rank);
+        FILE* f = fopen(filename, "wb");
+        int integers;
+        int* data = serialize_grammar(&(iter_args[rank].local_cfg), &integers);
+        recorder_write_zlib((unsigned char*)data, sizeof(int)*integers, f);
+        fclose(f);
+        free(data);
+    }
+
+    // write out global cst
+    FILE* f = fopen("./tmp/recorder.cst", "wb");
+    size_t len;
+    char* data = serialize_cst(global_cst, &len);
+    recorder_write_zlib((unsigned char*)data, len, f);
+    fclose(f);
+    free(data);
+
+    // TODO: write timestamps
+}
 
 /**
  * This function addes one record to the CFG and CST
@@ -386,6 +505,7 @@ void iterate_record(Record* record, void* arg) {
 
 
 int main(int argc, char** argv) {
+
     // Recorder trace directory
     std::string trace_dir = "/p/lustre2/wang116/corona/sources/Recorder-CFG/test/recorder-20241223/135530.813-corona171-wang116-a.out-756755";
     // filter file path
@@ -420,8 +540,7 @@ int main(int argc, char** argv) {
 
     // At this point we should have built the global cst and each
     // rank's local cfg. Now let's write them out.
-
-
+    save_filtered_trace(&reader, iter_args);
 
     recorder_free_reader(&reader);
 }
