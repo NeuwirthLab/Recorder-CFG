@@ -2,7 +2,7 @@ Usage
 =====
 
 
-Assume ``$RECORDER_ROOT`` is the location where you installed Recorder.
+Assume ``$RECORDER_INSTALL_PATH`` is the location where you installed Recorder.
 
 Generate traces
 ------------------
@@ -10,12 +10,16 @@ Generate traces
 .. code:: bash
 
    # For MPI programs
-   mpirun -np N -env LD_PRELOAD $RECORDER_ROOT/lib/librecorder.so ./your_app
+   mpirun -np $nprocs -env LD_PRELOAD $RECORDER_INSTALL_PATH/lib/librecorder.so ./your_app
+
+   # With srun
+   srun -n $nprocs --export=ALL,LD_PRELOAD=$RECORDER_INSTALL_PATH/lib/librecorder.so ./your_app
+
+   # With FLUX
+   flux run $nprocs --env LD_PRELOAD=RECORDER_INSTALL_PATH/lib/librecorder.so ./your_app
 
    # For non-MPI programs or programs that may spwan non-mpi children programs
-   RECORDER_WITH_NON_MPI=1 LD_PRELOAD=$RECORDER_ROOT/lib/librecorder.so ./your_app
-
-mpirun can be changed to your workload manager, e.g. srun.
+   RECORDER_WITH_NON_MPI=1 LD_PRELOAD=$RECORDER_INSTALL_PATH/lib/librecorder.so ./your_app
 
 The trace files will be written to the current directory under a folder
 named ``hostname-username-appname-pid-starttime``.
@@ -28,21 +32,25 @@ library (use ldd to check).*
 Configure tracing layers
 ------------------------
 
-Recorder is capable of tracing POSIX, MPI, MPI-IO, and HDF5 calls.
-By default, POSIX, MPI-IO, and HDF5 tracing are enabled.
+Currently, Recorder is capable of tracing POSIX, MPI, MPI-IO, HDF5, NetCDF and PnetCDF calls.
+By default, all supported I/O layers are enabled.
 At runtime (generally before running your application), you can set
 the following environment variables to dynamically enable/disable
 the tracing of certain layers.
 
 1 = enable; 0 = disable.
 
-* export RECORDER_POSIX_TRACING=[1|0]
+* export RECORDER_POSIX_TRACING=[1|0] (default: 1)
 
-* export RECORDER_MPIIO_TRACING=[1|0]
+* export RECORDER_MPIIO_TRACING=[1|0] (default: 1)
 
-* export RECORDER_MPI_TRACING=[1|0]
+* export RECORDER_HDF5_TRACING=[1|0] (default: 1)
 
-* export RECORDER_HDF5_TRACING=[1|0]
+* export RECORDER_NETCDF_TRACING=[1|0] (default: 1)
+
+* export RECORDER_PNETCDF_TRACING=[1|0] (default: 1)
+
+* export RECORDER_MPI_TRACING=[1|0] (default: 0)
 
 
 Human-readable traces
@@ -56,7 +64,7 @@ traces to plain text format.
 
 .. code:: bash
 
-   $RECORDER_ROOT/bin/recorder2text /path/to/your_trace_folder/
+   $RECORDER_INSTALL_PATH/bin/recorder2text /path/to/your_trace_folder/
 
 This will generate text fomart traces under
 ``/path/to/your_trace_folder/_text``.

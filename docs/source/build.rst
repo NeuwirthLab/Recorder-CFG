@@ -1,17 +1,14 @@
 Build Recorder
 -----------------
 
-There are two ways to build and install Recorder. The first way is to
-build Recorder from source using CMake. This is recomended as Recorder
-is currently under active development.
-
-1. Building Recorder with CMake (recommended)
+Building Recorder with CMake
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Dependencies**
 
--  MPI
--  HDF5
+-  MPI (required)
+-  HDF5 (required)
+-  NetCDF (optional) - Needed for NetCDF tracing
 -  PnetCDF (optional) - Needed for PnetCDF tracing
 -  Arrow (optional) > 5.0.0 - Needed for building Parquet convertor.
 -  CUDA (optional) - Needed for CUDA kernels interception.
@@ -66,7 +63,8 @@ kernels.
 add ``-DRECORDER_ENABLE_PARQUET=ON`` to cmake to build the Parquet
 format converter
 
-2. Building Recorder with Spack
+
+Building Recorder with Spack
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 *NOTE: please do not use Spack to install Recorder for now. The version
@@ -76,8 +74,7 @@ For now, building Recorder with Spack provides less flexibility. We will
 add the CMake options for spack as well.
 
 .. code:: bash
-
-   spack install recorder
+spack install recorder
 
 By default Recorder generates traces from all levels, you can use **~**
 to disable a specific level.

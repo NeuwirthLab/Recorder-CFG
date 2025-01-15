@@ -8,7 +8,7 @@
 #include "mpi.h"
 
 #include "hdf5.h"
-#include "hdf5_hl.h" 
+#include "hdf5_hl.h"
 
 #ifdef RECORDER_WITH_PNETCDF
 #include "pnetcdf.h"
@@ -47,15 +47,18 @@
 #define H5O_info2_t         int
 #define H5L_info1_t         int
 #define H5L_info2_t         int
-#define H5O_iterate1_t      int 
-#define H5O_iterate2_t      int 
+#define H5O_iterate1_t      int
+#define H5O_iterate2_t      int
 #define H5L_iterate2_t      int
 #define H5VL_class_value_t  int
 #define H5O_native_info_t   int
 #define H5VL_subclass_t     int
 #define H5R_ref_t           int
-#define H5D_chunk_iter_op_t int
 #endif  /* H5_VERS_MINOR < 12 */
+
+#if H5_VERS_MINOR < 13
+#define H5D_chunk_iter_op_t int
+#endif /* H5_VERS_MINOR < 13 */
 
 #if H5_VERS_MINOR < 14
 #define H5_atclose_func_t           int
@@ -79,9 +82,12 @@
 #ifdef NC_VERSION_MINOR
 
 #if (NC_VERSION_MAJOR*10+NC_VERSION_MINOR) < 49
-#define NC_memio    int
 #define NC_Dispatch int
 #endif
+#if (NC_VERSION_MAJOR*100+NC_VERSION_MINOR*10+NC_VERSION_PATCH) < 492
+#define NC_memio    int
+#endif
+
 
 #endif
 #endif
@@ -101,8 +107,8 @@ bool gotcha_netcdf_tracing();
 
 /**
  * WRAPPER_TYPE:   type of function pointer of the wrapper
- * WRAPPEE_HANDLE: wrapee handle name 
- * WRAPPER_NAME:   wrapper name 
+ * WRAPPEE_HANDLE: wrapee handle name
+ * WRAPPER_NAME:   wrapper name
  */
 #define WRAPPER_TYPE(func)   fptr_type_##func
 #define WRAPPEE_HANDLE(func) wrappee_handle_##func
@@ -135,8 +141,8 @@ bool gotcha_netcdf_tracing();
  * gotcha_get_wrappee() to get the correct pointer.
  * Otherwise, simply return the acutal funciton pointer.
  *
- * The _NOCHECK version assumes the function has been 
- * wrapped by GOTCHA library (i.e. function will be 
+ * The _NOCHECK version assumes the function has been
+ * wrapped by GOTCHA library (i.e. function will be
  * intercepted by Recorder). Caller of this version must
  * make sure of this!
  */
@@ -242,7 +248,7 @@ GOTCHA_WRAP(dup, int, (int oldfd));
 GOTCHA_WRAP(dup2, int, (int oldfd, int newfd));
 GOTCHA_WRAP(pipe, int, (int pipefd[2]));
 GOTCHA_WRAP(mkfifo, int, (const char *pathname, mode_t mode));
-GOTCHA_WRAP(umask, mode_t, (mode_t mask));
+//GOTCHA_WRAP(umask, mode_t, (mode_t mask));
 GOTCHA_WRAP(fdopen, FILE*, (int fd, const char *mode));
 GOTCHA_WRAP(fileno, int, (FILE *stream));
 GOTCHA_WRAP(access, int, (const char *path, int amode));
@@ -366,7 +372,7 @@ GOTCHA_WRAP(MPI_Cart_sub, int, (MPI_Comm comm, const int remain_dims[], MPI_Comm
 GOTCHA_WRAP(MPI_Comm_split_type, int, (MPI_Comm comm, int split_type, int key, MPI_Info info, MPI_Comm *newcomm));
 
 
-// HDF5 
+// HDF5
 GOTCHA_WRAP(H5Dread, herr_t, (hid_t dset_id, hid_t mem_type_id, hid_t mem_space_id, hid_t file_space_id, hid_t dxpl_id, void *buf));
 GOTCHA_WRAP(H5Adelete_by_idx, herr_t, (hid_t loc_id, const char *obj_name, H5_index_t idx_type, H5_iter_order_t order, hsize_t n, hid_t lapl_id));
 GOTCHA_WRAP(H5Fflush, herr_t, (hid_t object_id, H5F_scope_t scope));

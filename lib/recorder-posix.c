@@ -670,11 +670,13 @@ int WRAPPER_NAME(mkfifo)(const char *pathname, mode_t mode) {
     char** args = assemble_args_list(2, _fname, itoa(mode));
     RECORDER_INTERCEPTOR_EPILOGUE(2, args);
 }
+/*
 mode_t WRAPPER_NAME(umask)(mode_t mask) {
     RECORDER_INTERCEPTOR_PROLOGUE(mode_t, umask, (mask));
     char** args = assemble_args_list(1, itoa(mask));
     RECORDER_INTERCEPTOR_EPILOGUE(1, args);
 }
+*/
 
 FILE* WRAPPER_NAME(fdopen)(int fd, const char *mode) {
     GET_CHECK_FILENAME(fdopen, (fd, mode), &fd, ARG_TYPE_FD);

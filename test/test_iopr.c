@@ -10,7 +10,7 @@
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
-    int fd = open("./workfile.out", O_WRONLY);
+    int fd = open("./workfile.out", O_CREAT|O_WRONLY);
     printf("fd: %d\n", fd);
 
     off_t offset = 0;

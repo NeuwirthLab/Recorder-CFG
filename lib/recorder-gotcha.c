@@ -83,7 +83,7 @@ struct gotcha_binding_t posix_wrap_actions [] = {
     GOTCHA_WRAP_ACTION(dup2),
     GOTCHA_WRAP_ACTION(pipe),
     GOTCHA_WRAP_ACTION(mkfifo),
-    GOTCHA_WRAP_ACTION(umask),
+    //GOTCHA_WRAP_ACTION(umask),
     GOTCHA_WRAP_ACTION(fdopen),
     GOTCHA_WRAP_ACTION(fileno),
     GOTCHA_WRAP_ACTION(access),

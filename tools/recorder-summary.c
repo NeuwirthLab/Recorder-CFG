@@ -92,12 +92,12 @@ void print_metadata(RecorderReader* reader) {
     printf("========Recorder Tracing Parameters========\n");
     printf("Tracing start time: %s\n", tmbuf);
     printf("Total processes: %d\n", meta->total_ranks);
-    printf("POSIX tracing: %s\n", meta->posix_tracing?"Enabled":"Dsiabled");
-    printf("MPI tracing: %s\n", meta->mpi_tracing?"Enabled":"Dsiabled");
-    printf("MPI-IO tracing: %s\n", meta->mpiio_tracing?"Enabled":"Dsiabled");
-    printf("HDF5 tracing: %s\n", meta->hdf5_tracing?"Enabled":"Dsiabled");
-    printf("PnetCDF tracing: %s\n", meta->pnetcdf_tracing?"Enabled":"Dsiabled");
-    printf("NetCDF tracing: %s\n", meta->netcdf_tracing?"Enabled":"Dsiabled");
+    printf("POSIX tracing: %s\n", meta->posix_tracing?"Enabled":"Disabled");
+    printf("MPI tracing: %s\n", meta->mpi_tracing?"Enabled":"Disabled");
+    printf("MPI-IO tracing: %s\n", meta->mpiio_tracing?"Enabled":"Disabled");
+    printf("HDF5 tracing: %s\n", meta->hdf5_tracing?"Enabled":"Disabled");
+    printf("PnetCDF tracing: %s\n", meta->pnetcdf_tracing?"Enabled":"Disabled");
+    printf("NetCDF tracing: %s\n", meta->netcdf_tracing?"Enabled":"Disabled");
     printf("Store thread id: %s\n", meta->store_tid?"True":"False");
     printf("Store call depth: %s\n", meta->store_call_depth?"True":"False");
     printf("Timestamp compression: %s\n", meta->ts_compression?"True":"False");

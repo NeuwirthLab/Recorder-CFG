@@ -1,6 +1,12 @@
 Change Log
 ==========
 
+**Recorder 3.0.0** Dec 27, 2024
+
+1. Automatic Tracing Code Generation: Introduced a new tracing mechanism that employs a three-phase generic tracing wrapper for each function of interest. These tracing wrappers can be generated automatically and compiled as plugins, making it extremely easy to extend support for additional functions and I/O libraries. Added support for nearly all functions of PnetCDF and NetCDF.
+2. Supporting Diverse Programs: Extend Recorder to trace a wide range of program types, including single-threaded, multi-threaded, MPI, non-MPI programs, and CUDA kernels. Recorder also captures rich metadata, such as thread IDs and function call depth, offering a deeper insight into the traced data. These features enable the tracing and analysis of I/O operations across a broader range of HPC scenarios.
+3. Pattern-Recognition-Based Compression: Implemented a compression algorithm based on pattern recognition, capable of identifying and compressing recurring code patterns and common I/O patterns. This algorithm also includes an inter-process compression stage, effectively reducing redundancy across processes.
+
 **Recorder 2.4.0** Mar 24, 2023
 
 1. Implement inter-process compression using offset pattern detection

@@ -132,8 +132,6 @@ option(RECORDER_ENABLE_FCNTL_TRACE "Enable tracing of fcntl()." ON)
 option(RECORDER_INSTALL_TESTS "Enable installation of tests." OFF)
 
 
-set(PNETCDF_INSTALL_PATH "/usr" CACHE STRING "Build Recorder with PnetCDF")
-
 
 #mark_as_advanced(RECORDER_ENABLE_CUDA_TRACE)
 #mark_as_advanced(RECORDER_ENABLE_FCNTL_TRACE)
