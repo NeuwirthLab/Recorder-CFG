@@ -9,12 +9,15 @@
 #include <getopt.h>
 #include <math.h>
 #include <zlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 extern "C" {
 #include "reader.h"
 #include "recorder-sequitur.h"
 }
 
 static char formatting_record[32];
+static char filtered_trace_dir[1024];
 static CallSignature* global_cst = NULL;
 
 
@@ -139,37 +142,6 @@ public:
 };
 
 
-void parseArguments(int argc, char** argv, std::string& trace_dir, std::string& filter_path) {
-    const char* const short_opts = "t:f:h";
-    const option long_opts[] = {
-            {"trace-dir", required_argument, nullptr, 't'},
-            {"filter-path", required_argument, nullptr, 'f'},
-            {nullptr, no_argument, nullptr, 0}
-    };
-
-    while (true) {
-        const auto opt = getopt_long(argc, argv, short_opts, long_opts, nullptr);
-        if (-1 == opt) break;
-        switch (opt) {
-            case 't':
-                trace_dir = optarg;
-                break;
-
-            case 'f':
-                filter_path = optarg;
-                break;
-
-            default:
-                std::cout << "Usage: " << argv[0] << " [OPTIONS]\n"
-                          << "  -t, --trace-dir    Set the trace directory\n"
-                          << "  -f, --filter-path  Set the filter file path\n"
-                          << "  -h, --help         Display this help message\n";
-                exit(0);
-        }
-    }
-}
-
-
 std::vector<std::string> splitStringBySpace(const std::string& input) {
     std::vector<std::string> result;
     std::istringstream stream(input);
@@ -214,10 +186,11 @@ IntervalTable<KeyType, ValueType> parseRanges(const std::string& ranges) {
 }
 
 
-void read_filters(std::string &fpath, Filters<int, int> *filters){
+void read_filters(char* filter_path, Filters<int, int> *filters){
+    std::string fpath(filter_path);
     std::ifstream ffile(fpath);
     if (!ffile.is_open()) {
-        std::cerr << "Error: Unable to open file at " << fpath << "\n";
+        std::cerr << "Error: Unable to open file at " << fpath<< "\n";
     }
 
     std::string fline;
@@ -409,7 +382,7 @@ void save_updated_metadata(RecorderReader* reader) {
     void* fhdata;
 
     sprintf(old_metadata_filename, "%s/recorder.mt", reader->logs_dir);
-    sprintf(new_metadata_filename, "./tmp/recorder.mt");
+    sprintf(new_metadata_filename, "%s/recorder.mt", filtered_trace_dir);
 
     srcfh = fopen(old_metadata_filename, "rb");
     dstfh = fopen(new_metadata_filename, "wb");
@@ -447,7 +420,7 @@ void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
 
     for(int rank = 0; rank < reader->metadata.total_ranks; rank++) {
         char filename[1024] = {0};
-        sprintf(filename, "./tmp/%d.cfg", rank);
+        sprintf(filename, "%s/%d.cfg", filtered_trace_dir, rank);
         FILE* f = fopen(filename, "wb");
         int integers;
         int* cfg_data = serialize_grammar(&(iter_args[rank].local_cfg), &integers);
@@ -456,7 +429,7 @@ void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
         free(cfg_data);
 
         // write out global cst, all ranks have the same copy
-        sprintf(filename, "./tmp/%d.cst", rank);
+        sprintf(filename, "%s/%d.cst", filtered_trace_dir, rank);
         f = fopen(filename, "wb");
         recorder_write_zlib((unsigned char*)cst_data, cst_data_len, f);
         fclose(f);
@@ -550,17 +523,25 @@ void iterate_record(Record* record, void* arg) {
 
 int main(int argc, char** argv) {
 
-    // Recorder trace directory
-    std::string trace_dir = "/p/lustre2/wang116/corona/sources/Recorder-CFG/test/recorder-20241223/135530.813-corona171-wang116-a.out-756755";
-    // filter file path
-    std::string filter_path = "/p/lustre2/wang116/corona/sources/Recorder-CFG/test/recorder-20241223/135530.813-corona171-wang116-a.out-756755/filter.txt";
-    parseArguments(argc, argv, trace_dir, filter_path);
+    if (argc != 3) {
+        printf("usage: recorder-filter /path/to/trace-folder /path/to/filter.txt\n");
+        exit(1);
+    }
+
+    char* trace_dir = argv[1];
+    char* filter_path = argv[2];
 
     Filters<int, int> filters;
     read_filters(filter_path, &filters);
 
     RecorderReader reader;
-    recorder_init_reader(trace_dir.c_str(), &reader);
+    recorder_init_reader(trace_dir, &reader);
+
+    // create a new folder to store the filtered trace files
+    sprintf(filtered_trace_dir, "%s/_filtered", reader.logs_dir);
+    if(access(filtered_trace_dir, F_OK) != -1)
+        rmdir(filtered_trace_dir);
+    mkdir(filtered_trace_dir, S_IRWXU|S_IRWXG|S_IROTH|S_IXOTH);
 
     // Prepare the arguments to pass to each rank
     // when iterating local records
