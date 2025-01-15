@@ -410,7 +410,6 @@ void save_updated_metadata(RecorderReader* reader) {
     fclose(srcfh);
     fclose(dstfh);
     free(fhdata);
-    // copy the version file
 }
 
 void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
@@ -437,9 +436,21 @@ void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
 
     free(cst_data);
 
+    // Update metadata and write out
     save_updated_metadata(reader);
 
-    // TODO: write timestamps
+    // Save timestamps
+    // for now, we simply copy the timestamp files from
+    // the original trace folder, if we want to cut some
+    // records, we also need to cut timestamps
+    char cmd[1024];
+    sprintf(cmd, "cp %s/recorder.ts %s/recorder.ts", reader->logs_dir, filtered_trace_dir);
+    system(cmd);
+
+    // Similarly, simply copy the version file from the
+    // original trace folder.
+    sprintf(cmd, "cp %s/VERSION %s/VERSION", reader->logs_dir, filtered_trace_dir);
+    system(cmd);
 }
 
 /**
@@ -524,7 +535,7 @@ void iterate_record(Record* record, void* arg) {
 int main(int argc, char** argv) {
 
     if (argc != 3) {
-        printf("usage: recorder-filter /path/to/trace-folder /path/to/filter.txt\n");
+        printf("usage: recorder-filter /path/to/trace-folder /path/to/filter-file\n");
         exit(1);
     }
 
