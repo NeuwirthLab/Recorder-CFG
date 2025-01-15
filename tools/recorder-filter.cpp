@@ -15,7 +15,7 @@ extern "C" {
 }
 
 static char formatting_record[32];
-static CallSignature*  global_cst = NULL;
+static CallSignature* global_cst = NULL;
 
 
 template <typename KeyType>
@@ -401,26 +401,70 @@ void recorder_write_zlib(unsigned char* buf, size_t buf_size, FILE* out_file) {
     fseek(out_file, compressed_size, SEEK_CUR);
 }
 
+void save_updated_metadata(RecorderReader* reader) {
+    char old_metadata_filename[2048] = {0};
+    char new_metadata_filename[2048] = {0};
+    FILE* srcfh;
+    FILE* dstfh;
+    void* fhdata;
+
+    sprintf(old_metadata_filename, "%s/recorder.mt", reader->logs_dir);
+    sprintf(new_metadata_filename, "./tmp/recorder.mt");
+
+    srcfh = fopen(old_metadata_filename, "rb");
+    dstfh = fopen(new_metadata_filename, "wb");
+
+    // first copy the entire old meatdata file to the new metadata file
+    size_t res = 0;
+    fseek(srcfh, 0, SEEK_END);
+    long metafh_size = ftell(srcfh);
+    fhdata = malloc(metafh_size);
+    fseek(srcfh, 0, SEEK_SET);
+    res = fread(fhdata , 1, metafh_size, srcfh);
+    if (ferror(srcfh)) {
+        perror("Error reading metadata file\n");
+        exit(1);
+    }
+    res = fwrite(fhdata, 1, metafh_size, dstfh);
+
+    // then update the inter-process compression flag.
+    int oldval = reader->metadata.interprocess_compression;
+    reader->metadata.interprocess_compression = 0;
+    fseek(dstfh, 0, SEEK_SET);
+    fwrite(&reader->metadata, sizeof(RecorderMetadata), 1, dstfh);
+    reader->metadata.interprocess_compression = oldval;
+
+    fclose(srcfh);
+    fclose(dstfh);
+    free(fhdata);
+    // copy the version file
+}
+
 void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
+
+    size_t cst_data_len;
+    char* cst_data = serialize_cst(global_cst, &cst_data_len);
 
     for(int rank = 0; rank < reader->metadata.total_ranks; rank++) {
         char filename[1024] = {0};
         sprintf(filename, "./tmp/%d.cfg", rank);
         FILE* f = fopen(filename, "wb");
         int integers;
-        int* data = serialize_grammar(&(iter_args[rank].local_cfg), &integers);
-        recorder_write_zlib((unsigned char*)data, sizeof(int)*integers, f);
+        int* cfg_data = serialize_grammar(&(iter_args[rank].local_cfg), &integers);
+        recorder_write_zlib((unsigned char*)cfg_data, sizeof(int)*integers, f);
         fclose(f);
-        free(data);
+        free(cfg_data);
+
+        // write out global cst, all ranks have the same copy
+        sprintf(filename, "./tmp/%d.cst", rank);
+        f = fopen(filename, "wb");
+        recorder_write_zlib((unsigned char*)cst_data, cst_data_len, f);
+        fclose(f);
     }
 
-    // write out global cst
-    FILE* f = fopen("./tmp/recorder.cst", "wb");
-    size_t len;
-    char* data = serialize_cst(global_cst, &len);
-    recorder_write_zlib((unsigned char*)data, len, f);
-    fclose(f);
-    free(data);
+    free(cst_data);
+
+    save_updated_metadata(reader);
 
     // TODO: write timestamps
 }
@@ -431,12 +475,12 @@ void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
  * recorder-logger.c
  */
 static int current_cfg_terminal = 0;
-void grow_cst_cfg(Grammar* cfg, CallSignature* cst, Record* record) {
+void grow_cst_cfg(Grammar* cfg, Record* record) {
     int key_len;
     char* key = compose_cs_key(record, &key_len);
 
     CallSignature *entry = NULL;
-    HASH_FIND(hh, cst, key, key_len, entry);
+    HASH_FIND(hh, global_cst, key, key_len, entry);
     if(entry) {                         // Found
         entry->count++;
         free(key);
@@ -447,7 +491,7 @@ void grow_cst_cfg(Grammar* cfg, CallSignature* cst, Record* record) {
         entry->rank = 0;
         entry->terminal_id = current_cfg_terminal++;
         entry->count = 1;
-        HASH_ADD_KEYPTR(hh, cst, entry->key, entry->key_len, entry);
+        HASH_ADD_KEYPTR(hh, global_cst, entry->key, entry->key_len, entry);
     }
 
     append_terminal(cfg, entry->terminal_id, 1);
@@ -476,10 +520,10 @@ static void print_record(Record* record, RecorderReader *reader) {
 
 /**
  * Function that processes one record at a time
- * The pointer of this function needs to be
- * passed to the recorder_decode_records() call.
+ * The pointer of this function is passed
+ * to the recorder_decode_records() call.
  *
- * in this function:
+ * In this function:
  * 1. we apply the filters
  * 2. then build the cst and cfg
  */
@@ -500,7 +544,7 @@ void iterate_record(Record* record, void* arg) {
     printf("new:");
     print_record(&new_record, ia->reader);
 
-    grow_cst_cfg(&ia->local_cfg, global_cst, &new_record);
+    grow_cst_cfg(&ia->local_cfg, &new_record);
 }
 
 
@@ -518,7 +562,6 @@ int main(int argc, char** argv) {
     RecorderReader reader;
     recorder_init_reader(trace_dir.c_str(), &reader);
 
-
     // Prepare the arguments to pass to each rank
     // when iterating local records
     IterArg *iter_args = (IterArg*) malloc(sizeof(IterArg));
@@ -532,7 +575,6 @@ int main(int argc, char** argv) {
 
     // Go through each rank's records
     for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
-
         // this call iterates through all records of one rank
         // each record is processed by the iterate_record() function
         recorder_decode_records(&reader, rank, iterate_record, &(iter_args[rank]));
@@ -542,5 +584,12 @@ int main(int argc, char** argv) {
     // rank's local cfg. Now let's write them out.
     save_filtered_trace(&reader, iter_args);
 
+    // clean up everything
+    cleanup_cst(global_cst);
+    for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
+        sequitur_cleanup(&iter_args[rank].local_cfg);
+    }
     recorder_free_reader(&reader);
+
 }
+
