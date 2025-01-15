@@ -349,9 +349,8 @@ void rule_application(RecorderReader* reader, CFG* cfg, CST* cst, int rule_id, u
         int sym_exp = rule->rule_body[2*i+1];
 
         if (sym_val >= TERMINAL_START_ID) { // terminal
-            Record* record = reader_cs_to_record(&(cst->cs_list[sym_val]));
-
             for(int j = 0; j < sym_exp; j++) {
+                Record* record = reader_cs_to_record(&(cst->cs_list[sym_val]));
                 // update timestamps
                 uint32_t ts[2] = {ts_buf[0], ts_buf[1]};
                 ts_buf += 2;
@@ -360,9 +359,9 @@ void rule_application(RecorderReader* reader, CFG* cfg, CST* cst, int rule_id, u
                 reader->prev_tstart = record->tstart;
 
                 user_op(record, user_arg);
+                if(free_record)
+                    recorder_free_record(record);
             }
-            if(free_record)
-                recorder_free_record(record);
         } else {                            // non-terminal (i.e., rule)
             for(int j = 0; j < sym_exp; j++)
                 rule_application(reader, cfg, cst, sym_val, ts_buf, user_op, user_arg, free_record);
