@@ -225,15 +225,17 @@ void read_filters(char* filter_path, Filters<int, int> *filters){
     std::cout << "Successfully read filters.\n";
 }
 
-void apply_filter_to_record(Record* record, Record* new_record, RecorderReader *reader, Filters<int, int> *filters){
+bool apply_filter_to_record(Record* record, Record* new_record, RecorderReader *reader, Filters<int, int> *filters){
 
     // duplicate the original record and then
     // make modifications to the new record
     memcpy(new_record, record, sizeof(Record));
 
     std::string func_name = recorder_get_func_name(reader, record);
+    int match = 0;
     for(auto &filter:*filters) {
         if(filter.func_name == func_name) {
+            match =1;
             std::vector<std::string> new_args;
 
             // TODO: should the filters include the same number of incides as the actual call?
@@ -264,6 +266,7 @@ void apply_filter_to_record(Record* record, Record* new_record, RecorderReader *
             }
         }
     }
+    return match;
 }
 
 /**
@@ -522,13 +525,17 @@ void iterate_record(Record* record, void* arg) {
     // apply fiter to the record
     // then add it to the cst and cfg.
     Record new_record;
-    apply_filter_to_record(record, &new_record, ia->reader, ia->filters);
+    bool match = apply_filter_to_record(record, &new_record, ia->reader, ia->filters);
+    if (match){
+        // debug purpose; print out the modified record
+        printf("new:");
+        print_record(&new_record, ia->reader);
 
-    // debug purpose; print out the modified record
-    printf("new:");
-    print_record(&new_record, ia->reader);
-
-    grow_cst_cfg(&ia->local_cfg, &new_record);
+        grow_cst_cfg(&ia->local_cfg, &new_record);
+    }
+    // debug purpose; print out the original record is ignored
+    printf("ignored:");
+    print_record(record, ia->reader);
 }
 
 
@@ -556,13 +563,21 @@ int main(int argc, char** argv) {
 
     // Prepare the arguments to pass to each rank
     // when iterating local records
-    IterArg *iter_args = (IterArg*) malloc(sizeof(IterArg));
+    IterArg *iter_args = (IterArg*) malloc(sizeof(IterArg) * reader.metadata.total_ranks);
+    if (!iter_args) {
+        perror("Memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
     for(int rank = 0; rank < reader.metadata.total_ranks; rank++) {
         iter_args[rank].rank       = rank;
         iter_args[rank].reader     = &reader;
         iter_args[rank].filters    = &filters;
         // initialize local CFG
         sequitur_init(&(iter_args[rank].local_cfg));
+        if (!iter_args[rank].local_cfg.rules) {
+            fprintf(stderr, "Failed to initialize rules for rank %d\n", rank);
+            exit(EXIT_FAILURE);
+        }
     }
 
     // Go through each rank's records
