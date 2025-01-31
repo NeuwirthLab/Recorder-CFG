@@ -16,6 +16,13 @@ extern "C" {
 #include "recorder-sequitur.h"
 }
 
+#include <sstream>
+#include <set>
+#include <iterator>
+
+#include <unordered_map>
+
+
 static char formatting_record[32];
 static char filtered_trace_dir[1024];
 static CallSignature* global_cst = NULL;
@@ -141,7 +148,6 @@ public:
 
 };
 
-
 std::vector<std::string> splitStringBySpace(const std::string& input) {
     std::vector<std::string> result;
     std::istringstream stream(input);
@@ -184,6 +190,63 @@ IntervalTable<KeyType, ValueType> parseRanges(const std::string& ranges) {
 
     return table;
 }
+
+// class for statistics
+
+struct RankContribution {
+    int rank;
+    int total_size_r = 0;
+    int total_size_w = 0;
+    int num_r = 0;
+    int num_w = 0;
+    double avg_size_r = 0;
+    double avg_size_w = 0;
+
+    RankContribution() = default;
+
+    RankContribution(int r) : rank(r) {}
+
+    void updateContribution(int size_r, int size_w) {
+        if (size_r > 0) {
+            total_size_r += size_r;
+            num_r++;
+        }
+        if (size_w > 0) {
+            total_size_w += size_w;
+            num_w++;
+        }
+    }
+
+    // Compute averages after all operations
+    void computeAverages() {
+        if (num_r > 0) avg_size_r = static_cast<double>(total_size_r) / num_r;
+        if (num_w > 0) avg_size_w = static_cast<double>(total_size_w) / num_w;
+    }
+};
+
+
+class File {
+public:
+    std::string file_name;
+    std::unordered_map<int, RankContribution> rank_contributions;
+
+    File(const std::string& name) : file_name(name) {}
+
+    void updateRankContribution(int rank, int size_r, int size_w) {
+        if (rank_contributions.find(rank) == rank_contributions.end()) {
+            rank_contributions[rank] = RankContribution(rank);
+        }
+        rank_contributions[rank].updateContribution(size_r, size_w);
+    }
+
+    void computeFinalAverages() {
+        for (auto& [rank, rc] : rank_contributions) {
+            rc.computeAverages();
+        }
+    }
+};
+
+
 
 
 void read_filters(char* filter_path, Filters<int, int> *filters){
@@ -268,6 +331,209 @@ bool apply_filter_to_record(Record* record, Record* new_record, RecorderReader *
     }
     return match;
 }
+
+void sequitur_write_rules(Grammar *grammar, std::map<int, std::string> *output, int rank) {
+    Symbol *rule, *sym;
+    int rules_count = 0, symbols_count = 0;
+    DL_COUNT(grammar->rules, rule, rules_count);
+
+    DL_FOREACH(grammar->rules, rule) {
+        int count;
+        DL_COUNT(rule->rule_body, sym, count);
+        symbols_count += count;
+
+        std::ostringstream rule_stream;
+        // rule_stream << "Rule " << rule->val << " :-> ";
+
+        DL_FOREACH(rule->rule_body, sym) {
+            if (sym->exp > 1)
+                rule_stream << sym->val << "^" << sym->exp << " ";
+            else
+                rule_stream << sym->val << " ";
+        }
+
+        (*output)[rank] = rule_stream.str();
+    }
+}
+
+
+void sequitur_print_rules(Grammar *grammar) {
+    Symbol *rule, *sym;
+    int rules_count = 0, symbols_count = 0;
+    DL_COUNT(grammar->rules, rule, rules_count);
+
+    DL_FOREACH(grammar->rules, rule) {
+        int count;
+        DL_COUNT(rule->rule_body, sym, count);
+        symbols_count += count;
+
+        printf("Rule %d :-> ", rule->val);
+
+        DL_FOREACH(rule->rule_body, sym) {
+            if (sym->exp > 1)
+                printf("%d^%d ", sym->val, sym->exp);
+            else
+                printf("%d ", sym->val);
+        }
+        printf("\n");
+        //#endif
+    }
+}
+
+// Function to split a string by spaces
+std::vector<std::string> split(const std::string& str) {
+    std::istringstream iss(str);
+    return {std::istream_iterator<std::string>{iss}, std::istream_iterator<std::string>{}};
+}
+
+// Function to find the longest common subsequence (LCS)
+std::pair<std::set<std::string>, std::map<int, std::vector<std::string>>> findGlobalSubsequence(const std::map<int, std::string>& ranks) {
+    std::vector<std::vector<std::string>> sequences;
+    for (const auto& [_, cfg] : ranks) {
+        sequences.push_back(split(cfg));
+    }
+
+    // Find intersection of all sequences
+    std::set<std::string> globalOps(sequences[0].begin(), sequences[0].end());
+    for (const auto& seq : sequences) {
+        std::set<std::string> seqSet(seq.begin(), seq.end());
+        std::set<std::string> temp;
+        std::set_intersection(globalOps.begin(), globalOps.end(), seqSet.begin(), seqSet.end(),
+                              std::inserter(temp, temp.begin()));
+        globalOps = temp;
+    }
+
+    // Extract local operations
+    std::map<int, std::vector<std::string>> localOps;
+    int rankIndex = 0;
+    for (const auto& seq : sequences) {
+        for (const auto& op : seq) {
+            if (globalOps.find(op) == globalOps.end()) {
+                localOps[rankIndex].push_back(op);
+            }
+        }
+        rankIndex++;
+    }
+
+    return {globalOps, localOps};
+}
+
+// Function to parse CFGs into their structural components
+std::map<int, std::map<std::string, std::string>> parseCFGs(const std::map<int, std::string>& cfgs) {
+    std::map<int, std::map<std::string, std::string>> parsedCFGs;
+
+    for (const auto& [rank, cfg] : cfgs) {
+        std::vector<std::string> parts = split(cfg);
+        std::map<std::string, std::string> structure;
+
+        for (size_t i = 0; i < parts.size(); ++i) {
+            structure["C_" + std::to_string(i + 1)] = parts[i];
+        }
+
+        parsedCFGs[rank] = structure;
+    }
+
+    return parsedCFGs;
+}
+
+// Function to substitute symbols with component names
+std::map<int, std::string> substituteSymbolsWithComponents(const std::map<int, std::map<std::string, std::string>>& parsedCFGs) {
+    std::map<int, std::string> substitutedCFGs;
+
+    for (const auto& [rank, components] : parsedCFGs) {
+        std::ostringstream substitutedStream;
+
+        for (const auto& [key, value] : components) {
+            if (value.find('^') != std::string::npos) {
+                size_t exp_pos = value.find('^');
+                substitutedStream << key << "^" << value.substr(exp_pos + 1) << " ";
+            } else {
+                substitutedStream << key << " ";
+            }
+        }
+
+        substitutedCFGs[rank] = substitutedStream.str();
+    }
+
+    return substitutedCFGs;
+}
+
+// Function to find the longest common subsequence (LCS)
+std::vector<std::string> findLCS(const std::vector<std::vector<std::string>>& sequences) {
+    if (sequences.empty()) return {};
+
+    std::vector<std::string> lcs = sequences[0];
+
+    for (size_t i = 1; i < sequences.size(); ++i) {
+        std::vector<std::string> currentLCS;
+        std::set_intersection(
+                lcs.begin(), lcs.end(),
+                sequences[i].begin(), sequences[i].end(),
+                std::back_inserter(currentLCS)
+        );
+        lcs = currentLCS;
+    }
+
+    return lcs;
+}
+
+
+// Function to analyze CFGs
+void analyzeCFGs(const std::map<int, std::string>& ranks) {
+    // Step 1: Check for global patterns
+    auto [globalOps, localOps] = findGlobalSubsequence(ranks);
+
+    if (!globalOps.empty()) {
+        std::cout << "Global Operations Found:\n";
+        std::cout << "Global: ";
+        for (const auto& op : globalOps) {
+            std::cout << op << " ";
+        }
+        std::cout << "\nLocal:\n";
+        for (const auto& [rank, ops] : localOps) {
+            std::cout << "  Rank " << rank << ": ";
+            for (const auto& op : ops) {
+                std::cout << op << " ";
+            }
+            std::cout << "\n";
+        }
+    } else {
+        std::cout << "No Global Operations Found. Checking for Structural Similarities...\n";
+
+        // Step 2: Parse CFGs for structural similarities
+        auto parsedCFGs = parseCFGs(ranks);
+
+        if (!parsedCFGs.empty()) {
+            std::cout << "Substituting Symbols with Component Names...\n";
+            auto substitutedCFGs = substituteSymbolsWithComponents(parsedCFGs);
+
+            // Convert substituted CFGs into sequences for LCS
+            std::vector<std::vector<std::string>> sequences;
+            for (const auto& [rank, cfg] : substitutedCFGs) {
+                sequences.push_back(split(cfg));
+            }
+
+            // Print substituted CFGs
+            std::cout << "Substituted CFGs:\n";
+            for (const auto& [rank, cfg] : substitutedCFGs) {
+                std::cout << "Rank " << rank << ": " << cfg << "\n";
+            }
+
+            auto lcs = findLCS(sequences);
+            // Output LCS
+            std::cout << "Longest Common Subsequence:\n";
+            for (const auto& component : lcs) {
+                std::cout << component << " ";
+            }
+            std::cout << "\n";
+
+
+        } else {
+            std::cout << "No Structural Similarities Found.\n";
+        }
+    }
+}
+
 
 /**
  * helper structure for passing arguments
@@ -415,7 +681,7 @@ void save_updated_metadata(RecorderReader* reader) {
     free(fhdata);
 }
 
-void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
+void save_filtered_trace(RecorderReader* reader, IterArg* iter_args, std::map<int, std::string>* cfg_strings) {
 
     size_t cst_data_len;
     char* cst_data = serialize_cst(global_cst, &cst_data_len);
@@ -435,6 +701,9 @@ void save_filtered_trace(RecorderReader* reader, IterArg* iter_args) {
         f = fopen(filename, "wb");
         recorder_write_zlib((unsigned char*)cst_data, cst_data_len, f);
         fclose(f);
+        sequitur_print_rules(&(iter_args[rank].local_cfg));
+        sequitur_write_rules(&(iter_args[rank].local_cfg), cfg_strings, rank);
+
     }
 
     free(cst_data);
@@ -519,8 +788,8 @@ void iterate_record(Record* record, void* arg) {
     IterArg *ia = (IterArg*) arg;
 
     // debug purpose; print out the original record
-    printf("old:");
-    print_record(record, ia->reader);
+    // printf("old:");
+    // print_record(record, ia->reader);
 
     // apply fiter to the record
     // then add it to the cst and cfg.
@@ -528,15 +797,58 @@ void iterate_record(Record* record, void* arg) {
     bool match = apply_filter_to_record(record, &new_record, ia->reader, ia->filters);
     if (match){
         // debug purpose; print out the modified record
-        printf("new:");
-        print_record(&new_record, ia->reader);
+        // printf("new:");
+        // print_record(&new_record, ia->reader);
 
         grow_cst_cfg(&ia->local_cfg, &new_record);
     }
     // debug purpose; print out the original record is ignored
-    printf("ignored:");
-    print_record(record, ia->reader);
+    // printf("ignored:");
+    // print_record(record, ia->reader);
 }
+
+
+#define TERMINAL_START_ID 0
+
+void print_cfg(CFG* cfg, int rule_id) {
+    RuleHash *rule = NULL;
+    HASH_FIND_INT(cfg->cfg_head, &rule_id, rule);
+    assert(rule != NULL);
+
+    for(int i = 0; i < rule->symbols; i++) {
+        int sym_val = rule->rule_body[2*i+0];
+        int sym_exp = rule->rule_body[2*i+1];
+
+        if (sym_val >= TERMINAL_START_ID) { // terminal
+            printf("%d^%d\n", sym_val, sym_exp);
+        } else {                            // non-terminal (i.e., rule)
+            for(int j = 0; j < sym_exp; j++)
+                print_cfg(cfg, sym_val);
+        }
+    }
+}
+
+
+
+void generate_config_file(RecorderReader* reader, IterArg* iter_args){
+//    for(int i = 0; i < reader->metadata.total_ranks; i++){
+//        IterArg* current_iter_arg = &iter_args[i];
+//        Grammar* current_grammar = &current_iter_arg->local_cfg;
+//        if (!current_grammar->rules) {
+//            continue;
+//        }
+//        Symbol* current_rule = current_grammar->rules;
+//        while (current_grammar != NULL){
+//            // Traverse the rule body if it's a rule head
+//            if (current_rule->rule_body != NULL) {
+//                Symbol* body_symbol = current_rule->rule_body;
+//                if (body_symbol !=){}
+//            }
+//        }
+//
+//    }
+}
+
 
 
 int main(int argc, char** argv) {
@@ -587,9 +899,15 @@ int main(int argc, char** argv) {
         recorder_decode_records(&reader, rank, iterate_record, &(iter_args[rank]));
     }
 
+    generate_config_file(&reader, iter_args);
     // At this point we should have built the global cst and each
     // rank's local cfg. Now let's write them out.
-    save_filtered_trace(&reader, iter_args);
+
+    std::map<int, std::string> cfg_strings;
+    //std::vector<std::string> cfg_strings;
+
+    save_filtered_trace(&reader, iter_args, &cfg_strings);
+    analyzeCFGs(cfg_strings);
 
     // clean up everything
     cleanup_cst(global_cst);
