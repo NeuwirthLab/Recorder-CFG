@@ -225,11 +225,11 @@ struct RankContribution {
 };
 
 
-class File {
-public:
+struct File {
     std::string file_name;
     std::unordered_map<int, RankContribution> rank_contributions;
 
+    File() = default;
     File(const std::string& name) : file_name(name) {}
 
     void updateRankContribution(int rank, int size_r, int size_w) {
@@ -245,6 +245,59 @@ public:
         }
     }
 };
+
+struct Files {
+    std::unordered_map<std::string, File> file_map;
+
+    void addOrUpdateFile(const std::string& file_name, int rank, int size_r, int size_w) {
+        if (file_map.find(file_name) == file_map.end()) {
+            file_map[file_name] = File(file_name);
+        }
+        file_map[file_name].updateRankContribution(rank, size_r, size_w);
+    }
+
+    void computeAllAverages() {
+        for (auto& [file_name, file] : file_map) {
+            file.computeFinalAverages();
+        }
+    }
+};
+
+void get_per_file_stats(Record* record, RecorderReader *reader, Files *files){
+    std::string func_name = recorder_get_func_name(reader, record);
+    if (func_name == "fopen" || func_name == "open"){
+         std::string file_name = record->args[0];
+         // Check if the file already exists in files
+        if (files->file_map.find(file_name) == files->file_map.end()) {
+            // Create a new File object and add it to files
+            files->file_map[file_name] = File(file_name);
+        }
+    }else if (func_name.find("write") != std::string::npos){
+        int size_w = 0;
+        if (func_name == "write") {
+            size_w = std::stoi(record->args[2]); // `write(fd, buffer, size)`, size is args[2]
+        }
+        else if (func_name == "pwrite") {
+            size_w = std::stoi(record->args[2]); // `pwrite(fd, buffer, size, offset)`, size is args[2]
+        }
+        else if (func_name == "fwrite") {
+            size_w = std::stoi(record->args[1]) * std::stoi(record->args[2]);
+            // `fwrite(buffer, size, count, stream)`, size is `size * count` (args[1] * args[2])
+        }
+    }else if (func_name.find("read") != std::string::npos){
+         int size_r = 0;
+         if (func_name == "read") {
+            size_r = std::stoi(record->args[2]); // `read(fd, buffer, size)`, size is args[2]
+        }else if (func_name == "pread") {
+            size_r = std::stoi(record->args[2]); // `pread(fd, buffer, size, offset)`, size is args[2]
+        }else if (func_name == "fread") {
+            size_r = std::stoi(record->args[1]) * std::stoi(record->args[2]);
+            // `fread(buffer, size, count, stream)`, size is `size * count` (args[1] * args[2])
+        }
+
+    }
+
+}
 
 
 
